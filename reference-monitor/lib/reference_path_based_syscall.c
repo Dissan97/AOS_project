@@ -23,8 +23,8 @@ MODULE_AUTHOR("Dissan Uddin Ahmed <DissanAhmed@gmail.com>");
 
 #define VFS_SYSCALL_MSG "This pseudo file can be used to call system call of reference monitor\n"
 
-char *list_sys_call[3] = {CHANGE_STATE, CHANGE_PATH, NULL};
-
+char *list_sys_call[4] = {CHANGE_STATE, CHANGE_PATH, CHANGE_PASSWORD, NULL};
+const char *list_sys_call_string = "[cngst=sys_change_state, cngpth=sys_chang_path, cngpwd=sys_change_password]";
 DEFINE_MUTEX(syscall_proc_file_lock);
 
 
@@ -33,26 +33,23 @@ int check_avilable_sys_list(char *sys_name){
 	int i;
 	int len;
 	int ret = -1;
-	/*if (sys_name == NULL){
-		return -EINVAL;
-	}*/
+
 	AUDIT
     pr_info("%s[%s]: request for this: %s", MODNAME, __func__, sys_name);	
 	len = strlen(sys_name);
 	
 	for (i = 0; list_sys_call[i] != NULL; i++){
-		AUDIT
-		pr_info("%s[%s]: comparing %s - with %s\n", MODNAME, __func__, list_sys_call[i], sys_name);
+		
 		if (!strncmp(list_sys_call[i], sys_name, strlen(sys_name))){
 			AUDIT
-			pr_info("%s[%s]: found %s on avilable syscall\n", MODNAME, __func__, sys_name);
+			pr_info("%s[%s]: found %s on avilable syscalls %s\n", MODNAME, __func__, sys_name, list_sys_call_string);
 			return i;	
                         
 		}
 		ret ++;
 	}
 	
-	return -EBADMSG;
+	return -EINVAL;
 	
 }
 
@@ -125,7 +122,7 @@ int change_state_vfs_sys_wrapper(char *argv[], int format)
     pr_info("%s[%s]: got request for %s\n", MODNAME, __func__, CHANGE_STATE);
 
 	if (format != 4){
-		return -EBADMSG;
+		return -EINVAL;
 	}
 		
 
@@ -154,7 +151,7 @@ int change_path_vfs_sys_wrapper(char *argv[], int format)
 	int i;
 	
 	if (format != 6){
-		return -EBADMSG;
+		return -EINVAL;
 	}
 
 	i = 0;
@@ -176,6 +173,32 @@ int change_path_vfs_sys_wrapper(char *argv[], int format)
 	return do_change_path(pwd, pathname, op);
 }
 
+int change_password_vfs_sys_wrapper(char *argv[], int format){
+	char *old_pwd = NULL;
+	char *new_pwd = NULL;
+	int i;
+
+	if (format != 4){
+		return -EINVAL;
+	}
+
+	i = 0;
+	while (argv[i] != NULL){
+		if (!strncmp(argv[i], OLD_PWD, 4)){
+			old_pwd = argv[i + 1];
+		}
+		if (!strncmp(argv[i], NEW_PWD, 4)){
+			new_pwd = argv[i + 1];
+		}
+		i++;
+	}
+	
+	AUDIT
+	pr_info("%s[%s]: calling the sys_change_password with old=*******, new=*******\n", MODNAME, __func__);
+	return do_change_password(old_pwd, new_pwd);
+}
+
+
 
 ssize_t syscall_proc_write(struct file *filp, const char *buff, size_t len, loff_t *off)
 {
@@ -189,7 +212,7 @@ ssize_t syscall_proc_write(struct file *filp, const char *buff, size_t len, loff
 	
 	//cngpth -pwd password -opt ADD_PATH -pth pathname
 	//cngst -pwd password -opt OFF
-        
+    //cngpwd -old old_password -new new_password    
 
         
 	if(len >= LINE_SIZE) return -1;
@@ -198,9 +221,6 @@ ssize_t syscall_proc_write(struct file *filp, const char *buff, size_t len, loff
 	buffer[len] = '\0';
 	j = 1;
 
-	AUDIT
-	pr_info("%s[%s]: got this: %s\n", MODNAME, __func__, buffer);
-	
 	for (i = 0; i < len; i++){
 		if (buffer[i] == '\n'){
 			buffer[i] = '\0';
@@ -223,27 +243,30 @@ ssize_t syscall_proc_write(struct file *filp, const char *buff, size_t len, loff
 
 	ret = check_avilable_sys_list(argv[0]);
 
-	if (ret < 0){
+
+	switch (ret)
+	{
+	case 0:
+		ret = change_state_vfs_sys_wrapper(&argv[1], format);
+		break;
+
+	case 1:
+		ret = change_path_vfs_sys_wrapper(&argv[1], format);
+		break;
+	case 2:
+		ret = change_password_vfs_sys_wrapper(&argv[1], format);
+		break;
+	default: 
 		mutex_unlock(&syscall_proc_file_lock);
 		return -EBADMSG;
 	}
 	
-	if (ret == 0){
-		ret = change_state_vfs_sys_wrapper(&argv[1], format);
-		if (ret < 0){
+	if (ret < 0){
 			mutex_unlock(&syscall_proc_file_lock);
 			return ret;
-		}
-		
 	}
+
 	
-	if (ret == 1){
-		ret = change_path_vfs_sys_wrapper(&argv[1], format);
-		 if(ret){
-			mutex_unlock(&syscall_proc_file_lock);
-		 	return ret;
-		 }
-	}
 	
 
 	AUDIT

@@ -1,5 +1,7 @@
 #pragma once
 #include <linux/fs.h>
+#include <linux/atomic.h>
+#include <linux/rwlock.h>
 #define ON 0x01             // 0000 0001
 #define OFF 0x02            // 0000 0010 
 #define REC_ON 0x04         // 0000 0100
@@ -12,6 +14,7 @@
 #define SHA512_LENGTH (1 << 6) 
 #define SALT_LENGTH (1 << 4) // Define the length of the salt
 #define MAX_FILE_NAME 256
+#define DIGEST_SIZE (SHA512_LENGTH * 2)+ 1
 #pragma once
 
 #define MODNAME "REFERENCE MONITOR"
@@ -22,7 +25,11 @@
 #endif
 
 
-extern spinlock_t reference_state_spinlock;
+
+
+
+extern rwlock_t state_lock;
+extern rwlock_t password_lock;
 
 extern char pwd[(SHA512_LENGTH * 2)+ 1];
 extern unsigned long current_state;

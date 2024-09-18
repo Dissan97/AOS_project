@@ -56,12 +56,15 @@ int restore_black_list_entries (void)
                 if (!dummy_path.dentry->d_inode){
                         continue;
                 }
+                
                 dummy_path.dentry->d_inode->i_mode = entry->o_mode;
                 dummy_path.dentry->d_inode->i_flags = entry->o_flags;
                 dummy_path.dentry->d_inode-> i_ctime = current_time(dummy_path.dentry->d_inode);
                 dummy_path.dentry->d_inode-> i_mtime = current_time(dummy_path.dentry->d_inode);
-                dummy_path.dentry->d_inode-> i_atime = current_time(dummy_path.dentry->d_inode);               
-                }       
+                dummy_path.dentry->d_inode-> i_atime = current_time(dummy_path.dentry->d_inode);
+                mark_inode_dirty(dummy_path.dentry->d_inode);               
+                
+        }       
         synchronize_rcu();
 	spin_unlock(&restrict_path_lock);
         return ret;
@@ -113,10 +116,11 @@ int add_path(char *the_path)
                 kfree(entry);
                 return -ECANCELED;
         }
-        
+        inode_lock_shared(dummy_path.dentry->d_inode);
         entry->i_ino = dummy_path.dentry->d_inode->i_ino;   
         entry -> o_mode = dummy_path.dentry->d_inode->i_mode;
         entry -> o_flags = dummy_path.dentry->d_inode->i_flags;
+        inode_unlock_shared(dummy_path.dentry->d_inode);
 
         spin_lock(&restrict_path_lock);
         list_add_rcu(&entry->node, &restrict_path_list);
@@ -129,6 +133,7 @@ int add_path(char *the_path)
 int del_path(char *the_path)
 {
         struct rcu_restrict *entry;
+        struct path dummy_path;
         long len;
         if (!the_path){
                 return -EINVAL;
@@ -137,6 +142,21 @@ int del_path(char *the_path)
         spin_lock(&restrict_path_lock);
         list_for_each_entry(entry, &restrict_path_list, node){
                 if (!strncmp(the_path, entry->path, len)){
+                        
+                        if (kern_path(entry->path, LOOKUP_FOLLOW, &dummy_path)) {
+                                return -ENOKEY;
+                        }
+                        if (!dummy_path.dentry->d_inode){
+                                return -ENOKEY;
+                        }       
+                        
+                        dummy_path.dentry->d_inode->i_mode = entry->o_mode;
+                        dummy_path.dentry->d_inode->i_flags = entry->o_flags;
+                        dummy_path.dentry->d_inode-> i_ctime = current_time(dummy_path.dentry->d_inode);
+                        dummy_path.dentry->d_inode-> i_mtime = current_time(dummy_path.dentry->d_inode);
+                        dummy_path.dentry->d_inode-> i_atime = current_time(dummy_path.dentry->d_inode);
+                        mark_inode_dirty(dummy_path.dentry->d_inode);
+                        
                         list_del_rcu(&entry->node);
                         spin_unlock(&restrict_path_lock);
                         synchronize_rcu();

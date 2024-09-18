@@ -54,6 +54,8 @@
 #include <linux/uidgid.h>
 #include <linux/proc_fs.h>
 #include <linux/atomic.h>
+#include <linux/rwlock.h>
+
 
 
 /* *****************************************************
@@ -87,7 +89,7 @@
 * *****************************************************
 */ 
 
-char pwd[(SHA512_LENGTH * 2)+ 1] = {0};
+char pwd[DIGEST_SIZE] = {0};
 module_param_string(pwd, pwd, sizeof(pwd), 0000);
 
 unsigned int admin = 0xFFFFFFFF;
@@ -109,15 +111,13 @@ char single_file_name[PAGE_SIZE >> 2] = {0};
 module_param_string(single_file_name, single_file_name, sizeof(single_file_name), 0444);
 
 
-
-
 /**
 * *****************************************************
 *                 GLOBALS ARGS
 * *****************************************************
 */
 
-
+rwlock_t password_lock;
 unsigned long the_ni_syscall;
 char salt[(SALT_LENGTH + 1)];
 
@@ -130,7 +130,7 @@ char salt[(SALT_LENGTH + 1)];
 #ifdef NO_LOCK
 atomic_long_t atomic_current_state = ATOMIC_LONG_INIT(OFF); 
 #else
-spinlock_t reference_state_spinlock;
+rwlock_t state_lock;
 #endif 
 
 
@@ -141,7 +141,7 @@ spinlock_t reference_state_spinlock;
   * *****************************************************
 */
 
-unsigned long new_sys_call_array[] = {0x0,0x0};//please set to sys_got_sleep and sys_change_paths at startup
+unsigned long new_sys_call_array[] = {0x0,0x0,0x0};
 #define HACKED_ENTRIES (int)(sizeof(new_sys_call_array)/sizeof(unsigned long))
 int restore[HACKED_ENTRIES] = {[0 ... (HACKED_ENTRIES-1)] -1};
 
@@ -193,8 +193,34 @@ asmlinkage long sys_change_paths(char * pwd, char *path, int op){
 }
 
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(4,17,0)
+__SYSCALL_DEFINEx(2, _change_password,char *, old_password, char *, new_password){
+        int ret;
+        char from_user_password_old[MAX_FROM_USER] = {0};
+        char from_user_password_new[MAX_FROM_USER] = {0};
+        
+        ret = copy_from_user(from_user_password_old, old_password, MAX_FROM_USER);
+        if (ret < 0){
+                pr_err("%s[%s]: cannot copy from the user the password old\n", MODNAME, __func__);
+                return -EACCES;
+        }
+
+        ret = copy_from_user(from_user_password_new, new_password, MAX_FROM_USER);
+        if (ret < 0){
+                pr_err("%s[%s]: cannot copy from the user the password new\n", MODNAME, __func__);
+                return -EACCES;
+        }
+
+        return do_change_password(from_user_password_old, from_user_password_new);    
+#else
+asmlinkage long sys_change_password(char *old_password, char *new_password){
+        return do_change_password(old_password, new_password);
+#endif
+}
+
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(4,17,0)
 long sys_change_state = (unsigned long) __x64_sys_change_state;       
-long sys_change_paths = (unsigned long) __x64_sys_change_paths;       
+long sys_change_paths = (unsigned long) __x64_sys_change_paths; 
+long sys_change_password = (unsigned long) __x64_sys_change_password;
 #else
 #endif
 
@@ -214,13 +240,7 @@ long sys_change_paths = (unsigned long) __x64_sys_change_paths;
 LIST_HEAD(restrict_path_list);
 spinlock_t restrict_path_lock;
 
-/**
-  * *****************************************************
-  *             KERNEL DAEMON HOUSEKEEPER
-  * *****************************************************
- */
-struct task_struct *daemon_task;
-#define DAEMON_NAME "RM DAEMON HOUSEKEEPER"
+
 
 
 /* 
@@ -263,40 +283,6 @@ unsigned long append_defer_device_major = -1;
 struct workqueue_struct *deferred_queue;
 char *file_appendonly;
 
-//kernel house_keeper daemon
-static int daemon_housekeepr_restrict_list(void *data)
-{
-        struct path path;
-        struct rcu_restrict *entry;
-        int error;
-
-        AUDIT
-        pr_info("%s: daemon alive\n", MODNAME);
-        while (!kthread_should_stop()) {
-                
-                msleep(60000); // Sleep for 1 minute
-                AUDIT
-                pr_info("%s: daemon wake up looking for path if it still exists\n", MODNAME);
-                spin_lock(&restrict_path_lock);
-                list_for_each_entry(entry, &restrict_path_list, node){
-                        error = kern_path(entry->path, LOOKUP_FOLLOW, &path);
-                        if (error){
-                                list_del_rcu(&entry->node);
-                                synchronize_rcu();
-                                spin_unlock(&restrict_path_lock);
-                                kfree(entry->path);
-                                kfree(entry);
-                
-                        }
-                }
-                synchronize_rcu();
-                spin_unlock(&restrict_path_lock);
-        }
-
-    return 0;
-}
-
-
 static int __init reference_monitor_init(void) 
 {
 
@@ -317,6 +303,7 @@ static int __init reference_monitor_init(void)
                 vfs_mkrmdir_unlink_wrapper,
                 vfs_mkrmdir_unlink_wrapper
         };
+
         
 #if LINUX_VERSION_CODE > KERNEL_VERSION(5,4,233)
         pr_warn("%s: WARNING!!! THIS MODULE IS DEVELOPED ON KERNEL 5.4.105 ON UBUNTU 18 YOUR VERSION %d\n", MODNAME, LINUX_VERSION_CODE);
@@ -346,7 +333,8 @@ static int __init reference_monitor_init(void)
                 pr_err("%s: password to short\n", MODNAME);
                 return -EINVAL;
         }
-
+        rwlock_init(&password_lock);
+        rwlock_init(&state_lock);
         ret = generate_salt(salt);
 
         if (ret){
@@ -368,6 +356,7 @@ static int __init reference_monitor_init(void)
 
         new_sys_call_array[0] = (unsigned long)sys_change_state;
         new_sys_call_array[1] = (unsigned long)sys_change_paths;
+        new_sys_call_array[2] = (unsigned long)sys_change_password;
         ret = get_entries(restore,HACKED_ENTRIES,(unsigned long*)the_syscall_table,&the_ni_syscall);
 
         if (ret != HACKED_ENTRIES){
@@ -390,6 +379,7 @@ static int __init reference_monitor_init(void)
                 
                 probes[i].pre_handler = pre_handlers[i];
                 probes[i].symbol_name = target_functions[i];
+                
         
                 ret = register_kprobe(&probes[i]);
                 if (ret < 0){
@@ -439,15 +429,9 @@ static int __init reference_monitor_init(void)
         }
         AUDIT
         pr_info("%s: workqueue created\n", MODNAME);
-        
-        daemon_task = kthread_run(daemon_housekeepr_restrict_list, NULL, DAEMON_NAME);
-        if ((ret = IS_ERR(daemon_task))){
-                pr_err("Failed to create daemon thread\n");
-                goto error_work_queue_installed;
-        }
+
         return ret;
-error_work_queue_installed:
-        destroy_workqueue(deferred_queue); 
+
 error_proc_file_created:
         proc_remove(proc_file);
 error_proc_folder_created:
@@ -484,7 +468,7 @@ static void __exit reference_monitor_cleanup(void)
        
         AUDIT
         pr_info("%s: safe restoring and releasing nodes in restrict_path_list\n",MODNAME);
-        restore_black_list_entries (void);        
+        restore_black_list_entries ();        
         spin_lock(&restrict_path_lock);
         list_for_each_entry(p, &restrict_path_list, node){      
                 list_del_rcu(&p->node);
@@ -500,9 +484,6 @@ static void __exit reference_monitor_cleanup(void)
         destroy_workqueue(deferred_queue);
         AUDIT
         pr_info("%s: work queue destryed\n", MODNAME);
-        kthread_stop(daemon_task);
-        AUDIT
-        pr_info("%s: stopped %s\n", MODNAME, DAEMON_NAME);
 }
 
 

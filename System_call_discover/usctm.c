@@ -161,7 +161,7 @@ void syscall_table_finder(void){
 
 #define MAX_FREE 15
 int free_entries[MAX_FREE];
-module_param_array(free_entries,int,NULL,0660);//default array size already known - here we expose what entries are free
+module_param_array(free_entries,int,NULL,0444);//default array size already known - here we expose what entries are free
 
 
 //#define SYS_CALL_INSTALL

@@ -4,9 +4,12 @@
 
 #define CHANGE_STATE "cngst"
 #define CHANGE_PATH "cngpth"
+#define CHANGE_PASSWORD "cngpwd"
 #define PWD "-pwd"
 #define OPT "-opt"
 #define PTH "-pth"
+#define OLD_PWD "-old"
+#define NEW_PWD "-new"
 #define LINE_SIZE 256
 #define DEVICE_SYS_VFS "REFERENCE SYS_VFS DEVICE"
 

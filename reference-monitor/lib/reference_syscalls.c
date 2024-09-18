@@ -9,7 +9,7 @@
 #include <linux/cred.h>
 #include <linux/uidgid.h>
 #include <linux/atomic.h>
-
+#include <linux/rwlock.h>
 #include "include/reference_types.h"
 #include "include/reference_hooks.h"
 #include "include/reference_syscalls.h"
@@ -24,17 +24,24 @@
  */
 
 
+
+//reader
 int check_pwd(char *try_password)
 {
-        char tmp[(SHA512_LENGTH * 2)+ 1];
+        char tmp[DIGEST_SIZE];
         int ret = 0;
-        
+
         ret = hash_plaintext(salt, tmp, try_password);
+
+
         if (ret) {
                 pr_err("%s[%s]: hash_plaintext_error %d\n", MODNAME, __func__, ret);
                 return ret;
         }
-        ret = strncmp(tmp, pwd, ((SHA512_LENGTH * 2)+ 1));
+
+        read_lock(&(password_lock));
+        ret = strncmp(tmp, pwd, (DIGEST_SIZE));
+        read_unlock(&(password_lock));
         return ret;
 }
 
@@ -55,8 +62,6 @@ int do_change_state(char * the_pwd, int the_state)
         if (likely(cred->euid.val != admin)){
                 return -EACCES;
         }
-
-        pr_info("%s[%s]: the password %s the state: %d\n",MODNAME, __func__, the_pwd, the_state);
 
         if (the_pwd == NULL || !(the_state & ON || the_state & OFF || the_state & REC_ON || the_state & REC_OFF)){
                 return -EINVAL;
@@ -96,11 +101,11 @@ int do_change_state(char * the_pwd, int the_state)
         }
         return -ECANCELED;
 #else         
-        spin_lock(&(reference_state_spinlock));
+        write_lock(&(state_lock));
         AUDIT
         pr_info("%s[%s]: requested previous state: %ld\n", MODNAME, __func__, current_state);
         if (current_state == the_state){
-                spin_unlock(&(reference_state_spinlock));
+                write_unlock(&(state_lock));
                 return -ECANCELED;
         }
 
@@ -118,7 +123,7 @@ int do_change_state(char * the_pwd, int the_state)
         }
         AUDIT
         pr_info("%s[%s]: requested new state: %d\n", MODNAME, __func__, the_state);
-        spin_unlock(&(reference_state_spinlock));
+        write_unlock(&(state_lock));
 #endif
         return 0;
 }
@@ -157,16 +162,16 @@ int do_change_path(char *the_pwd, char *the_path, int op)
                 return -EINVAL;
         }
         if ((ret = check_pwd(the_pwd)) < 0){
-                return ret;
+                return -EINVAL;
         }; 
 
 #ifdef NO_LOCK
     old_state = atomic_long_read(&atomic_current_state);
 #else        
 
-        spin_lock(&(reference_state_spinlock));
+        read_lock(&(state_lock));
         old_state = current_state;
-        spin_unlock(&(reference_state_spinlock));
+        read_unlock(&(state_lock));
 #endif
         if (!((old_state &  REC_OFF) || (old_state & REC_ON))){
                 if (!((op & REC_ON) || (op & REC_OFF))){
@@ -198,4 +203,39 @@ int do_change_path(char *the_pwd, char *the_path, int op)
         return ret;
 }
 
+// writer
+int do_change_password(char *old_password, char *new_password)
+{
+        char tmp[DIGEST_SIZE];
+        int ret = 0;
+        
+        if (strlen(new_password) <=8){
+                pr_err("%s: password to short\n", MODNAME);
+                return -EINVAL;
+        }
 
+        if (!strcmp(old_password, new_password)){
+                pr_err("%s[%s]: same old and new password\n", MODNAME, __func__);
+                return -EINVAL;
+        }
+
+        ret = check_pwd(old_password);
+        if (ret){
+                pr_err("%s[%s]: cannot change the password %d\n", MODNAME, __func__, ret);
+                return -EINVAL;
+        }
+        //check gone
+        ret = hash_plaintext(salt, tmp, new_password);
+
+        if (ret){
+                return -EINVAL;
+        }
+
+        write_lock(&(password_lock));
+
+        memset(pwd, 0,(DIGEST_SIZE));
+        strncpy(pwd, tmp, (DIGEST_SIZE));
+        write_unlock(&password_lock);
+
+        return ret;
+}
