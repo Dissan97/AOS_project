@@ -124,8 +124,11 @@ void defer_top_half(void (*work_func)(struct work_struct *))
 
     // Allocate work data
     data = kmalloc(sizeof(*data), GFP_KERNEL);
-    if (!data)
+    if (!data){
+        pr_err("%s[%s]: Failed to allocate memory for data\n", MODNAME, __func__);
         return;
+    }
+        
 
     // Get current process credentials
     data->tgid = current->tgid;
@@ -139,14 +142,23 @@ void defer_top_half(void (*work_func)(struct work_struct *))
         kfree(data);
         return;
     }
-
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5,8,0)
+    mmap_read_lock(mm);
+#else
     down_read(&mm->mmap_sem);
+#endif
     exe_file = mm->exe_file;
     if (exe_file) {
         get_file(exe_file);
         path_get(&exe_file->f_path);
     }
+
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5,8,0)
+    mmap_read_unlock(mm);
+#else
     up_read(&mm->mmap_sem);
+#endif
+    
     mmput(mm);
 
     if (!exe_file) {

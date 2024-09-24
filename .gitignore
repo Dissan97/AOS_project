@@ -58,3 +58,5 @@ dkms.conf
 test-dir/*
 */test-dir
 */test-dir/*
+certificate
+certificate/*

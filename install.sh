@@ -17,12 +17,10 @@ run_with_sudo() {
     echo "$PASSWORD" | sudo -S "$@"
 }
 
+source "$global_pwd/unistall.sh" "$PASSWORD"
 
 cd "$global_pwd/System_call_discover" || exit 1
 echo "Entering System_call_discover folder"
-
-echo "cleaning the module objects"
-make clean
 echo "make module objects"
 make
 echo "loading the kernel module"
@@ -37,8 +35,6 @@ echo "Entering singlefile-FS folder"
 rm -rf image
 run_with_sudo umount ./mount
 rm -rf mount
-echo "cleaning the module objects"
-make clean
 echo "make module objects"
 make
 echo "creating file for the filesystem"
@@ -51,12 +47,10 @@ echo "Finished all tasks in singlefile-FS"
 
 cd "$global_pwd/reference-monitor" || exit 1
 echo "Entering reference-monitor folder"
-echo "cleaning the module objects"
-make clean
 echo "make module objects"
 make
 echo "loading the kernel module"
 run_with_sudo make mount
-
-echo "Automation completed successfully."
+cd "$global_pwd"
+echo "installation completed successfully."
 

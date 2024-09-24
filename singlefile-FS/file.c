@@ -12,7 +12,8 @@
 #include "singlefilefs.h"
 
 static struct mutex lock_log; 
-static int onefilefs_open(struct inode *inode, struct file *filp) {
+static int onefilefs_open(struct inode *inode, struct file *filp) 
+{
     bool trunc = (filp->f_flags & O_TRUNC);
 
     if (trunc) {
@@ -24,7 +25,8 @@ static int onefilefs_open(struct inode *inode, struct file *filp) {
     return 0;
 }
 
-ssize_t onefilefs_read(struct file * filp, char __user * buf, size_t len, loff_t * off) {
+ssize_t onefilefs_read(struct file * filp, char __user * buf, size_t len, loff_t * off) 
+{
 
     loff_t offset;
     struct buffer_head *bh = NULL;
@@ -56,7 +58,7 @@ ssize_t onefilefs_read(struct file * filp, char __user * buf, size_t len, loff_t
     if (offset + len > DEFAULT_BLOCK_SIZE)
         len = DEFAULT_BLOCK_SIZE - offset;
 
-    //compute the actual index of the the block to be read from device
+    
     block_to_read = *off / DEFAULT_BLOCK_SIZE + 2; //the value 2 accounts for superblock and file-inode on device
     
     printk("%s: read operation must access block %d of the device",MOD_NAME, block_to_read);
@@ -82,9 +84,10 @@ struct dentry *onefilefs_lookup(struct inode *parent_inode, struct dentry *child
     struct buffer_head *bh = NULL;
     struct inode *the_inode = NULL;
 
-    printk("%s: running the lookup inode-function for name %s",MOD_NAME,child_dentry->d_name.name);
+    //printk("%s: running the lookup inode-function for name %s",MOD_NAME,child_dentry->d_name.name);
 
-    if(!strcmp(child_dentry->d_name.name, UNIQUE_FILE_NAME)){
+    if(!strcmp(child_dentry->d_name.name, UNIQUE_FILE_NAME))
+    {
 
 	
 	//get a locked inode from the cache 
@@ -99,24 +102,23 @@ struct dentry *onefilefs_lookup(struct inode *parent_inode, struct dentry *child
 
 
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(5,12,0)
-    inode_init_owner(current->cred->user_ns,root_inode, NULL, S_IFDIR);//set the root user as owner of the FS root
+    inode_init_owner(current->cred->user_ns,root_inode, NULL, S_IFDIR);
 #else
-    inode_init_owner(the_inode, NULL, S_IFDIR);//set the root user as owner of the FS root
+    inode_init_owner(the_inode, NULL, S_IFDIR);
 #endif	
-	//this work is done if the inode was not already cached
+	
 	the_inode->i_mode = S_IFREG | S_IRUSR | S_IRGRP | S_IROTH | S_IWUSR | S_IWGRP | S_IXUSR | S_IXGRP | S_IXOTH;
-        the_inode->i_fop = &onefilefs_file_operations;
+    the_inode->i_fop = &onefilefs_file_operations;
 	the_inode->i_op = &onefilefs_inode_ops;
 
-	//just one link for this file
 	set_nlink(the_inode,1);
 
-	//now we retrieve the file size via the FS specific inode, putting it into the generic inode
-    	bh = (struct buffer_head *)sb_bread(sb, SINGLEFILEFS_INODES_BLOCK_NUMBER );
-    	if(!bh){
-		iput(the_inode);
-		return ERR_PTR(-EIO);
-    	}
+	
+    bh = (struct buffer_head *)sb_bread(sb, SINGLEFILEFS_INODES_BLOCK_NUMBER );
+    if(!bh){
+        iput(the_inode);
+        return ERR_PTR(-EIO);
+    }
 	FS_specific_inode = (struct onefilefs_inode*)bh->b_data;
 	the_inode->i_size = FS_specific_inode->file_size;
     brelse(bh);
@@ -124,8 +126,8 @@ struct dentry *onefilefs_lookup(struct inode *parent_inode, struct dentry *child
     d_add(child_dentry, the_inode);
 	dget(child_dentry);
 
-	//unlock the inode to make it usable 
-    	unlock_new_inode(the_inode);
+	
+    unlock_new_inode(the_inode);
 
 	return child_dentry;
     }
@@ -134,7 +136,8 @@ struct dentry *onefilefs_lookup(struct inode *parent_inode, struct dentry *child
 
 }
 
-ssize_t onefilefs_write(struct file *filp, const char __user *buf, size_t len, loff_t *off) {
+ssize_t onefilefs_write(struct file *filp, const char __user *buf, size_t len, loff_t *off) 
+{
     struct inode *inode = filp->f_inode;
     struct buffer_head *bh;
     loff_t pos = inode->i_size; // Start appending from the end of the file

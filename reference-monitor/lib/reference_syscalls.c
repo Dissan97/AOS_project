@@ -60,7 +60,7 @@ int do_change_state(char * the_pwd, int the_state)
         cred = current_cred();
 
         if (likely(cred->euid.val != admin)){
-                return -EACCES;
+                return -EPERM;
         }
 
         if (the_pwd == NULL || !(the_state & ON || the_state & OFF || the_state & REC_ON || the_state & REC_OFF)){
@@ -70,7 +70,7 @@ int do_change_state(char * the_pwd, int the_state)
 
         if ((ret = check_pwd(the_pwd))){
                 pr_info("%s[%s]: check pwd failed from_user %s\n", MODNAME, __func__, the_pwd);
-                return -EINVAL;
+                return -EACCES;
         }; 
 #ifdef NO_LOCK
         old_state = atomic_long_read(&atomic_current_state);
@@ -148,7 +148,7 @@ int do_change_path(char *the_pwd, char *the_path, int op)
 
         if (likely(cred->euid.val != admin)){
                 pr_warn("%s[%s]: this system call must be called from security admin\n", MODNAME, __func__);
-                return -EACCES;
+                return -EPERM;
         }
 
         if ((the_path == NULL) || !((op & ADD_PATH) || (op & REMOVE_PATH)) ||
@@ -162,7 +162,7 @@ int do_change_path(char *the_pwd, char *the_path, int op)
                 return -EINVAL;
         }
         if ((ret = check_pwd(the_pwd)) < 0){
-                return -EINVAL;
+                return -EACCES;
         }; 
 
 #ifdef NO_LOCK
@@ -208,7 +208,19 @@ int do_change_password(char *old_password, char *new_password)
 {
         char tmp[DIGEST_SIZE];
         int ret = 0;
+          
+        const struct cred *cred;
         
+        cred = current_cred();
+
+        if (likely(cred->euid.val != admin)){
+                pr_warn("%s[%s]: this system call must be called from security admin\n", MODNAME, __func__);
+                return -EPERM;
+        }
+        if (old_password == NULL || new_password == NULL){
+                return -EINVAL;
+        }
+
         if (strlen(new_password) <=8){
                 pr_err("%s: password to short\n", MODNAME);
                 return -EINVAL;
@@ -228,7 +240,7 @@ int do_change_password(char *old_password, char *new_password)
         ret = hash_plaintext(salt, tmp, new_password);
 
         if (ret){
-                return -EINVAL;
+                return ret;
         }
 
         write_lock(&(password_lock));

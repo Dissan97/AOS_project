@@ -13,7 +13,7 @@ no_lock:
 	make -C /lib/modules/$(shell uname -r)/build M=$(PWD) CFLAGS_MODULE="-DNO_LOCK" modules
 
 mount:
-	insmod the_reference_monitor.ko the_syscall_table=$(hacked_sys_table_addr) pwd='RefMonitorPwd' admin=1000 single_file_name=$(realpath ../singlefile-FS/mount/the-file)
+	insmod the_reference_monitor.ko the_syscall_table=$(hacked_sys_table_addr) pwd='RefMonitorPwd' single_file_name=$(realpath ../singlefile-FS/mount/the-file)
 
 unmount:
 	rmmod the_reference_monitor

@@ -291,31 +291,46 @@ static int __init reference_monitor_init(void)
         int ret;
         kuid_t kuid;
         
-        const char target_functions [HOOKS_SIZE][12] = {
-                "vfs_open",
+        const char target_functions [HOOKS_SIZE][16] = {
+                "do_filp_open",
                 "vfs_mkdir",
                 "vfs_rmdir",
                 "vfs_unlink"
         };
         const kprobe_pre_handler_t pre_handlers [HOOKS_SIZE] = {
-                vfs_open_wrapper,
-                vfs_mkrmdir_unlink_wrapper,
-                vfs_mkrmdir_unlink_wrapper,
-                vfs_mkrmdir_unlink_wrapper
+                pre_do_filp_open_handler,
+                pre_vfs_mk_rmdir_and_unlink_handler,
+                pre_vfs_mk_rmdir_and_unlink_handler,
+                pre_vfs_mk_rmdir_and_unlink_handler
         };
+
+
+#if defined(__x86_64__)
+    pr_info("Running on x86_64 architecture.\n");
+
+#elif defined(__aarch64__)
+    pr_info("Running on AArch64 (ARM 64-bit) architecture.\n");
+
+#elif defined(__i386__)
+    pr_info("Running on x86 (32-bit) architecture.\n");
+
+#elif defined(__arm__)
+    pr_info("Running on ARM (32-bit) architecture.\n");
+
+#else
+    pr_err("%s: Unsupported architecture. This module supports only x86_64, aarch64, i386, and arm\n", MODNAME);
+    return -EPERM;
+#endif
 
         
 #if LINUX_VERSION_CODE > KERNEL_VERSION(5,4,233)
         pr_warn("%s: WARNING!!! THIS MODULE IS DEVELOPED ON KERNEL 5.4.105 ON UBUNTU 18 YOUR VERSION %d\n", MODNAME, LINUX_VERSION_CODE);
 #endif
-
-        if (admin == 0xFFFFFFFF){
-                pr_err("%s: pass security admin uid\n", MODNAME);
-                return -EINVAL;
-        }
+        // this parameter can be layter configurable cause administrator can be another user
+        admin = 0;
         kuid.val = admin;
         if (!uid_valid(kuid)){
-                pr_err("%s: not valid admin %d\n", MODNAME, admin);
+                pr_err("%s: cannot setup root=as_admin valid admin %d\n", MODNAME, admin);
                 return -EINVAL;
         }
         if (strlen(single_file_name) < 4){

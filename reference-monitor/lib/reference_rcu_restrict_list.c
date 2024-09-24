@@ -16,9 +16,8 @@
 const char *proc = "/proc";
 const char *sys = "/sys";
 const char *run = "/run";
-const char *usr = "/usr";
 const char *var = "/var";
-const char *bin = "/bin";
+const char *tmp = "/tmp";
 
 
 int is_path_in(const char *the_path)
@@ -92,8 +91,6 @@ int add_path(char *the_path)
                 return -ENOMEM;
         }
         
-        
-        //TODO add dentry search
         len = strlen(the_path);
         entry->path = kzalloc(sizeof(char)*(len + 1), GFP_KERNEL);
         
@@ -116,10 +113,12 @@ int add_path(char *the_path)
                 kfree(entry);
                 return -ECANCELED;
         }
+
+
         inode_lock_shared(dummy_path.dentry->d_inode);
         entry->i_ino = dummy_path.dentry->d_inode->i_ino;   
-        entry -> o_mode = dummy_path.dentry->d_inode->i_mode;
-        entry -> o_flags = dummy_path.dentry->d_inode->i_flags;
+        entry->o_mode = dummy_path.dentry->d_inode->i_mode;
+        entry->o_flags = dummy_path.dentry->d_inode->i_flags;
         inode_unlock_shared(dummy_path.dentry->d_inode);
 
         spin_lock(&restrict_path_lock);
@@ -171,15 +170,17 @@ int del_path(char *the_path)
 }
 int forbitten_path(const char *the_path){
         if (!the_path) {
-                return -1;
+                return 1;
+        }
+        if ((strlen(the_path) == 1 && the_path[0] == '/')){
+                return 1;
         }
        return (strncmp(the_path, proc, 5) == 0 ||
         strncmp(the_path, sys, 4) == 0 ||
         strncmp(the_path, run, 4) == 0 ||
-        strncmp(the_path, usr, 4) == 0 ||
         strncmp(the_path, var, 4) == 0 ||
-        strncmp(the_path, bin, 4) == 0  ||
-        strcmp(single_file_name, the_path) == 0) ? -1 : 0;
+        strncmp(the_path, tmp, 4) == 0 ||
+        strcmp(single_file_name, the_path) == 0) ? 1 : 0;
 }
 
 

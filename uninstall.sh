@@ -41,5 +41,5 @@ echo "cleaning the module objects"
 make clean
 echo "removing module the_reference_monitor"
 run_with_sudo rmmod the_reference_monitor
-
+cd "$global_pwd"
 echo "Automation completed successfully."
