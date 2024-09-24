@@ -6,7 +6,7 @@
 #include "include/ref_syscall.h"
 #include "include/mock.h"
 
-const char *password_error_message = "Cannot operate test without password\nlaunch 'program.out -pwd password'";
+const char *startup_error_message = "Cannot operate test without password\nlaunch 'program.out -pwd password -conf conf_file-path'";
 void mock_password(int argc, char **argv, password_t *password){
     
     int check = 0;
@@ -23,8 +23,7 @@ void mock_password(int argc, char **argv, password_t *password){
     } 
     
     if (!check){
-        printf("%s\n", password_error_message
-    );
+        printf("Cannot operate test without password");
         exit(EXIT_FAILURE);
     }
     
@@ -47,6 +46,7 @@ void mock_password(int argc, char **argv, password_t *password){
     printf("mock ready good password: %s - %s bad_password\n", password->good_password, password->bad_password);
 }
 
+
 int mock_get_state()
 {
     FILE *file;
@@ -66,3 +66,7 @@ int mock_get_state()
     state = atoi(buff);
     return state;
 }
+
+
+
+

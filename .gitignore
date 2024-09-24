@@ -60,3 +60,5 @@ test-dir/*
 */test-dir/*
 certificate
 certificate/*
+*/resources/test-dir
+*/resources/test-dir/*
