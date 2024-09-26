@@ -42,26 +42,26 @@ int is_path_in(const char *the_path)
 int restore_black_list_entries (void)
 {
         struct rcu_restrict *entry;
-        struct path dummy_path;
+        struct path path;
         int ret;
         AUDIT 
         pr_info("%s[%s]: restoring inodes\n", MODNAME, __func__);
         spin_lock(&restrict_path_lock);
         list_for_each_entry_rcu(entry, &restrict_path_list, node) {
-		ret = kern_path(entry->path, LOOKUP_FOLLOW, &dummy_path);
+		ret = kern_path(entry->path, LOOKUP_FOLLOW, &path);
                 if (ret) {
                         continue;
                 }
-                if (!dummy_path.dentry->d_inode){
+                if (!path.dentry->d_inode){
                         continue;
                 }
                 
-                dummy_path.dentry->d_inode->i_mode = entry->o_mode;
-                dummy_path.dentry->d_inode->i_flags = entry->o_flags;
-                dummy_path.dentry->d_inode-> i_ctime = current_time(dummy_path.dentry->d_inode);
-                dummy_path.dentry->d_inode-> i_mtime = current_time(dummy_path.dentry->d_inode);
-                dummy_path.dentry->d_inode-> i_atime = current_time(dummy_path.dentry->d_inode);
-                mark_inode_dirty(dummy_path.dentry->d_inode);               
+                path.dentry->d_inode->i_mode = entry->o_mode;
+                path.dentry->d_inode->i_flags = entry->o_flags;
+                path.dentry->d_inode-> i_ctime = current_time(path.dentry->d_inode);
+                path.dentry->d_inode-> i_mtime = current_time(path.dentry->d_inode);
+                path.dentry->d_inode-> i_atime = current_time(path.dentry->d_inode);
+                mark_inode_dirty(path.dentry->d_inode);               
                 
         }       
         synchronize_rcu();
@@ -73,10 +73,11 @@ int add_path(char *the_path)
 {
 
         struct rcu_restrict *entry;
-        struct path dummy_path;
+        struct path path;
         int err;
         long len;
-
+        char *absolute_path;
+        char *buf;
         if (!the_path){
                 return -EINVAL;
         }
@@ -91,39 +92,59 @@ int add_path(char *the_path)
                 return -ENOMEM;
         }
         
-        len = strlen(the_path);
+        err = kern_path(the_path, LOOKUP_FOLLOW, &path);
+        
+        if (err){
+                kfree(entry);
+                return err;
+        }
+
+        buf = (char *)kzalloc(PATH_MAX, GFP_KERNEL);
+        if (!buf) {
+                pr_warn("%s[%s]: Failed to allocate memory\n", MODNAME, __func__);
+                path_put(&path);
+                return -ENOMEM;
+        }
+
+        absolute_path = dentry_path_raw(path.dentry, buf, PATH_MAX);
+        if (IS_ERR(absolute_path)) {
+                pr_warn("%s[%s]: Failed to get absolute path\n", MODNAME, __func__);
+                kfree(entry);
+                kfree(buf);
+                path_put(&path);
+                return PTR_ERR(absolute_path);
+        }
+
+        len = strlen(absolute_path);
         entry->path = kzalloc(sizeof(char)*(len + 1), GFP_KERNEL);
         
         if (!entry->path){
                 pr_warn("%s[%s]: cannot alloc memory to insert new path\n",MODNAME, RCU_RESTRICT_LIST);
                 kfree(entry);
+                kfree(buf);
                 return -ENOMEM;
         }
-        strncpy(entry->path, the_path, len);
+        strncpy(entry->path, absolute_path, len);
+        kfree(buf);
+        pr_info("%s[%s]: adding this path: %s entry->path\n", MODNAME, __func__, entry->path);
 
-        err = kern_path(the_path, LOOKUP_FOLLOW, &dummy_path);
-        if (err){
-                kfree(entry->path);
-                kfree(entry);
-                return err;
-        }
-
-        if (!dummy_path.dentry->d_inode){
+        if (!path.dentry->d_inode){
                 kfree(entry->path);
                 kfree(entry);
                 return -EEXIST;
         }
 
 
-        inode_lock_shared(dummy_path.dentry->d_inode);
-        entry->i_ino = dummy_path.dentry->d_inode->i_ino;   
-        entry->o_mode = dummy_path.dentry->d_inode->i_mode;
-        entry->o_flags = dummy_path.dentry->d_inode->i_flags;
-        inode_unlock_shared(dummy_path.dentry->d_inode);
+        inode_lock_shared(path.dentry->d_inode);
+        entry->i_ino = path.dentry->d_inode->i_ino;   
+        entry->o_mode = path.dentry->d_inode->i_mode;
+        entry->o_flags = path.dentry->d_inode->i_flags;
+        inode_unlock_shared(path.dentry->d_inode);
 
         spin_lock(&restrict_path_lock);
         list_add_rcu(&entry->node, &restrict_path_list);
         spin_unlock(&restrict_path_lock);
+
         return 0;
 }
 
@@ -132,29 +153,55 @@ int add_path(char *the_path)
 int del_path(char *the_path)
 {
         struct rcu_restrict *entry;
-        struct path dummy_path;
+        struct path path;
         long len;
+        char *absolute_path;
+        char *buf;
+        int err;
+
         if (!the_path){
                 return -EINVAL;
         }
-        len = strlen(the_path);
+
+        err = kern_path(the_path, LOOKUP_FOLLOW, &path);
+        if (err){
+                pr_warn("%s[%s]: the path=%s provided not exist", MODNAME, __func__, the_path);
+                return -ENOENT;
+        }
+        buf = (char *)kzalloc(PATH_MAX, GFP_KERNEL);
+        if (!buf) {
+                pr_warn("%s[%s]: Failed to allocate memory\n", MODNAME, __func__);
+                path_put(&path);
+                return -ENOMEM;
+        }
+
+        absolute_path = dentry_path_raw(path.dentry, buf, PATH_MAX);
+        if (IS_ERR(absolute_path)) {
+                pr_warn("%s[%s]: Failed to get absolute path\n", MODNAME, __func__);
+                kfree(buf);
+                path_put(&path);
+                return PTR_ERR(absolute_path);
+        }
+
+
+        len = strlen(absolute_path);
         spin_lock(&restrict_path_lock);
         list_for_each_entry(entry, &restrict_path_list, node){
-                if (!strncmp(the_path, entry->path, len)){
+                if (!strncmp(absolute_path, entry->path, len)){
                         
-                        if (kern_path(entry->path, LOOKUP_FOLLOW, &dummy_path)) {
+                        if (kern_path(entry->path, LOOKUP_FOLLOW, &path)) {
                                 return -ENOENT;
                         }
-                        if (!dummy_path.dentry->d_inode){
+                        if (!path.dentry->d_inode){
                                 return -ENOENT;
                         }       
                         
-                        dummy_path.dentry->d_inode->i_mode = entry->o_mode;
-                        dummy_path.dentry->d_inode->i_flags = entry->o_flags;
-                        dummy_path.dentry->d_inode-> i_ctime = current_time(dummy_path.dentry->d_inode);
-                        dummy_path.dentry->d_inode-> i_mtime = current_time(dummy_path.dentry->d_inode);
-                        dummy_path.dentry->d_inode-> i_atime = current_time(dummy_path.dentry->d_inode);
-                        mark_inode_dirty(dummy_path.dentry->d_inode);
+                        path.dentry->d_inode->i_mode = entry->o_mode;
+                        path.dentry->d_inode->i_flags = entry->o_flags;
+                        path.dentry->d_inode-> i_ctime = current_time(path.dentry->d_inode);
+                        path.dentry->d_inode-> i_mtime = current_time(path.dentry->d_inode);
+                        path.dentry->d_inode-> i_atime = current_time(path.dentry->d_inode);
+                        mark_inode_dirty(path.dentry->d_inode);
                         
                         list_del_rcu(&entry->node);
                         spin_unlock(&restrict_path_lock);

@@ -49,7 +49,8 @@ ssize_t onefilefs_read(struct file * filp, char __user * buf, size_t len, loff_t
     	 mutex_unlock(&lock_log);
         return 0;}
     else if (*off + len > file_size){
-        len = file_size - *off;}
+        len = file_size - *off;
+    }
 
     //determine the block level offset for the operation
  

@@ -63,3 +63,4 @@ certificate/*
 */resources/test-dir
 */resources/test-dir/*
 singlefile-FS/mount/the-file
+singlefile-FS/image

@@ -44,7 +44,7 @@ int singlefilefs_fill_super(struct super_block *sb, void *data, int silent) {
 
     //check on the expected magic number
     if(magic != sb->s_magic){
-	return -EBADF;
+	    return -EBADF;
     }
 
     sb->s_fs_info = NULL; //FS specific data (the magic number) already reported into the generic superblock
