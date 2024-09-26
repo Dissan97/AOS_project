@@ -183,16 +183,18 @@ int del_path(char *the_path)
                 return PTR_ERR(absolute_path);
         }
 
-
+	
         len = strlen(absolute_path);
         spin_lock(&restrict_path_lock);
         list_for_each_entry(entry, &restrict_path_list, node){
                 if (!strncmp(absolute_path, entry->path, len)){
                         
                         if (kern_path(entry->path, LOOKUP_FOLLOW, &path)) {
+				kfree(buf);
                                 return -ENOENT;
                         }
                         if (!path.dentry->d_inode){
+				kfree(buf);
                                 return -ENOENT;
                         }       
                         
@@ -212,6 +214,7 @@ int del_path(char *the_path)
                 }
         }
         spin_unlock(&restrict_path_lock);
+	kfree(buf);
 
    return -ENOENT;   
 }
