@@ -210,6 +210,7 @@ int del_path(char *the_path)
                         synchronize_rcu();
                         kfree(entry->path);
                         kfree(entry);
+			kfree(buf);
                         return 0;
                 }
         }
