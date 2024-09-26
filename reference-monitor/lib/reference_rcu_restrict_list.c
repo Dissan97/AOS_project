@@ -35,7 +35,7 @@ int is_path_in(const char *the_path)
 		}
 	}
 	rcu_read_unlock();
-        return -1;
+        return 1;
 }
 
 
@@ -82,7 +82,7 @@ int add_path(char *the_path)
         }
 
         if (!is_path_in(the_path)){
-                return -ECANCELED;
+                return -EEXIST;
         }
 
         entry = kzalloc(sizeof(struct rcu_restrict), GFP_KERNEL);
@@ -111,7 +111,7 @@ int add_path(char *the_path)
         if (!dummy_path.dentry->d_inode){
                 kfree(entry->path);
                 kfree(entry);
-                return -ECANCELED;
+                return -EEXIST;
         }
 
 
@@ -143,10 +143,10 @@ int del_path(char *the_path)
                 if (!strncmp(the_path, entry->path, len)){
                         
                         if (kern_path(entry->path, LOOKUP_FOLLOW, &dummy_path)) {
-                                return -ENOKEY;
+                                return -ENOENT;
                         }
                         if (!dummy_path.dentry->d_inode){
-                                return -ENOKEY;
+                                return -ENOENT;
                         }       
                         
                         dummy_path.dentry->d_inode->i_mode = entry->o_mode;
@@ -166,7 +166,7 @@ int del_path(char *the_path)
         }
         spin_unlock(&restrict_path_lock);
 
-   return -ENOKEY;   
+   return -ENOENT;   
 }
 int forbitten_path(const char *the_path){
         if (!the_path) {

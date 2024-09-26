@@ -32,6 +32,7 @@ rm -rf mount
 echo "cleaning the module objects"
 make clean
 echo "removing module singlefilefs"
+rm "singlefilemakefs"
 run_with_sudo rmmod singlefilefs
 echo "Finished all tasks in singlefile-FS"
 

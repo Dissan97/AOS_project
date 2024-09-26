@@ -60,10 +60,11 @@ int do_change_state(char * the_pwd, int the_state)
         cred = current_cred();
 
         if (likely(cred->euid.val != admin)){
+                pr_err("%s[%s]: invalid euid admin=%d current=%d\n",MODNAME, __func__, admin, cred->euid.val);
                 return -EPERM;
         }
 
-        if (the_pwd == NULL || !(the_state & ON || the_state & OFF || the_state & REC_ON || the_state & REC_OFF)){
+        if (the_pwd == NULL || (the_state != ON && the_state != OFF && the_state != REC_ON && the_state != REC_OFF)){
                 return -EINVAL;
         }
         
@@ -151,17 +152,22 @@ int do_change_path(char *the_pwd, char *the_path, int op)
                 return -EPERM;
         }
 
-        if ((the_path == NULL) || !((op & ADD_PATH) || (op & REMOVE_PATH)) ||
-                (op & REMOVE_PATH & ADD_PATH)){
+        if (the_path == NULL){
+                pr_err("%s[%s]: path cannot be NULL\n", MODNAME, __func__);
+                return -EINVAL;
+        }
+
+        if (((op != ADD_PATH) && (op != REMOVE_PATH))){
+                pr_err("%s[%s]: passed bad operation vaule nor ADD_PATH=%d nor REMOVE_PATH=%d\n", MODNAME, __func__, ADD_PATH, REMOVE_PATH);
                 return -EINVAL;
         }
 
 
-        if (forbitten_path(the_path) < 0){
+        if (forbitten_path(the_path)){
                 pr_warn("%s[%s]: required forbitten path=%s\n", MODNAME, __func__, the_path);
                 return -EINVAL;
         }
-        if ((ret = check_pwd(the_pwd)) < 0){
+        if ((ret = check_pwd(the_pwd))){
                 return -EACCES;
         }; 
 
@@ -174,13 +180,8 @@ int do_change_path(char *the_pwd, char *the_path, int op)
         read_unlock(&(state_lock));
 #endif
         if (!((old_state &  REC_OFF) || (old_state & REC_ON))){
-                if (!((op & REC_ON) || (op & REC_OFF))){
-                        return  -ECANCELED;
-                }
-                
-                if ((ret = do_change_state(the_pwd, op))){
-                        return ret;
-                }
+                pr_err("%s[%s]: reference monitor is not in reconfiguration mode\n", MODNAME, __func__);
+                return  -ECANCELED;
         }
         
         if (op & ADD_PATH){

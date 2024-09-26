@@ -136,8 +136,18 @@ int change_state_vfs_sys_wrapper(char *argv[], int format)
 		}
 		i++;
 	}
+
+
+	if (pwd == NULL){
+		return -EINVAL;
+	}
+
+	if (strcmp(pwd,"(null)") == 0){
+		return -EINVAL;
+	}
+
     AUDIT  
-    pr_info("%s[%s]: ready to call actual syscall sys_change_state with pwd=%s opt=%d\n", MODNAME, __func__, pwd, op);
+    pr_info("%s[%s]: ready to call actual syscall sys_change_state with pwd=****** opt=%d\n", MODNAME, __func__, op);
 	return do_change_state(pwd, op);	
 	
 }
@@ -170,6 +180,23 @@ int change_path_vfs_sys_wrapper(char *argv[], int format)
 	AUDIT
 	pr_info("%s[%s]: calling the sys_change_path with pwd=%s, path=%s, op=%d\n", MODNAME, __func__,
 	pwd, pathname, op);
+	
+	if (pathname == NULL){
+		return -EINVAL;
+	}
+
+	if (strcmp(pathname,"(null)") == 0){
+		return -EINVAL;
+	}
+
+	if (pwd == NULL){
+		return -EINVAL;
+	}
+
+	if (strcmp(pwd,"(null)") == 0){
+		return -EINVAL;
+	}
+	
 	return do_change_path(pwd, pathname, op);
 }
 
@@ -191,6 +218,22 @@ int change_password_vfs_sys_wrapper(char *argv[], int format){
 			new_pwd = argv[i + 1];
 		}
 		i++;
+	}
+
+	if (old_pwd == NULL){
+		return -EINVAL;
+	}
+
+	if (strcmp(old_pwd, "(null)") == 0){
+		return -EINVAL;
+	}
+
+	if (new_pwd == NULL){
+		return -EINVAL;
+	}
+
+	if (strcmp(new_pwd, "(null)") == 0){
+		return -EINVAL;
 	}
 	
 	AUDIT

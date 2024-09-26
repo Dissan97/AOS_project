@@ -153,43 +153,50 @@ int restore[HACKED_ENTRIES] = {[0 ... (HACKED_ENTRIES-1)] -1};
 
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(4,17,0)
 __SYSCALL_DEFINEx(2, _change_state, char *, pwd, int, state){
+   
+#else
+asmlinkage long sys_change_state(char *pwd, int state){
+#endif
         int ret;
         char from_user_password[MAX_FROM_USER] = {0};
+
+        if (pwd == NULL){
+                pr_err("%s[%s]: password cannot be null\n", MODNAME, __func__);
+                return -EINVAL;
+        }
+
         ret = copy_from_user(from_user_password, pwd, MAX_FROM_USER);
         
         if (ret < 0){
                 pr_err("%s[%s]: cannot copy from the user the password\n", MODNAME, __func__);
-                return -EACCES;
+                return -EINVAL;
         }
-        return do_change_state(from_user_password, state);    
-#else
-asmlinkage long sys_change_state(char *pwd, int state){
-        return do_change_state(pwd, state);
-#endif
+        return do_change_state(from_user_password, state); 
 }
 
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(4,17,0)
 __SYSCALL_DEFINEx(3, _change_paths, char *, pwd, char *, path, int, op){
+#else
+asmlinkage long sys_change_paths(char * pwd, char *path, int op){
+#endif
         int ret;
         char from_user_password[MAX_FROM_USER] = {0};
         char from_user_path[MAX_FROM_USER] = {0};
-
+        if (pwd == NULL || path == NULL){
+                pr_err("%s[%s]: path or password cannot be NULL\n", MODNAME, __func__);
+                return -EINVAL;
+        }
         ret = copy_from_user(from_user_password, pwd, MAX_FROM_USER);
         if (ret < 0){
                 pr_warn("%s[%s]: cannot copy from the user the password\n", MODNAME, __func__);
-                return -EACCES;
+                return -EINVAL;
         }
         ret = copy_from_user(from_user_path, path, MAX_FROM_USER);
         if (ret < 0){
                 pr_warn("%s[%s]: cannot copy from the user the path\n", MODNAME, __func__);
-                return -EACCES;
+                return -EINVAL;
         }
         return do_change_path(from_user_password, from_user_path, op);
-
-#else
-asmlinkage long sys_change_paths(char * pwd, char *path, int op){
-#endif
-	return do_change_path(pwd, path, op);
 }
 
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(4,17,0)
