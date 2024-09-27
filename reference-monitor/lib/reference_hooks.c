@@ -109,7 +109,7 @@ int pre_do_filp_open_handler(struct kprobe *ri, struct pt_regs * regs)
     struct open_flags *op_flag = (struct open_flags *)(regs->ARM_r2); // arg2 (open_flags)
 #endif
 
-    char *full_path;
+    	char *full_path;
 	int flags = op_flag -> open_flag;
 	int is_allowed;
 	struct path path;
@@ -118,6 +118,7 @@ int pre_do_filp_open_handler(struct kprobe *ri, struct pt_regs * regs)
 	int is_dir = 0;
 	char *last_slash;
 	unsigned long old_len;
+	int exists = 1;
 
 	
 	// they are just opening in read mode no problem here
@@ -130,14 +131,15 @@ int pre_do_filp_open_handler(struct kprobe *ri, struct pt_regs * regs)
     } else {
         full_path = get_full_user_path(dfd, user_path);
         if (full_path == NULL) {
-            full_path = (char *)real_path;
+        	full_path = (char *)real_path;
+		exists = 0;
         }
     }
 	
 	if (forbitten_path(full_path)){
 		return 0;
 	}
-
+	// todo add check if exists and then retrieve the directory by pwd() if there is no slash
 	if (kern_path(full_path, LOOKUP_FOLLOW, &path)){
 		//path does not exist
 		last_slash = strrchr(full_path, '/');
