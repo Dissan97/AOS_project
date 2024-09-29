@@ -1,5 +1,5 @@
 obj-m += the_reference_monitor.o
-the_reference_monitor-objs += reference_monitor.o lib/scth.o  lib/reference_hooks.o lib/reference_syscalls.o lib/reference_rcu_restrict_list.o lib/reference_hash.o lib/reference_path_based_syscall.o lib/reference_defer.o
+the_reference_monitor-objs += reference_monitor.o lib/scth.o lib/reference_path_solver.o  lib/reference_hooks.o lib/reference_syscalls.o lib/reference_rcu_restrict_list.o lib/reference_hash.o lib/reference_path_based_syscall.o lib/reference_defer.o
 
 hacked_sys_table_addr = $(shell cat /sys/module/the_usctm/parameters/sys_call_table_address)
 

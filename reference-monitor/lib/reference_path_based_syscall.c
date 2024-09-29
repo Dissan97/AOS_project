@@ -246,31 +246,40 @@ int change_password_vfs_sys_wrapper(char *argv[], int format){
 ssize_t syscall_proc_write(struct file *filp, const char *buff, size_t len, loff_t *off)
 {
 
-	char buffer[LINE_SIZE];
+	char *buffer;
 	int i;
     int j;
 	int ret;
-	char *argv[9];
+	char *argv[9] = {0};
 	int format = 0;
 	
 	//cngpth -pwd password -opt ADD_PATH -pth pathname
 	//cngst -pwd password -opt OFF
     //cngpwd -old old_password -new new_password    
+    
+	if(len >= (PATH_MAX + NAME_MAX + 1)) {
+		pr_warn("%s[%s]: to much element passed", MODNAME, __func__);
+		return -1;
+	}
 
-        
-	if(len >= LINE_SIZE) return -1;
+	buffer = kzalloc((len + 1), GFP_KERNEL);
+	if (!buffer){
+		pr_err("%s[%s]: no mem available\n", MODNAME, __func__);
+		return -ENOMEM;
+	}
+
 	mutex_lock(&syscall_proc_file_lock);
-	ret = copy_from_user(buffer,buff,len);
+	ret = copy_from_user(buffer, buff, len);
 	buffer[len] = '\0';
 	j = 1;
 
-	for (i = 0; i < len; i++){
+	for (i = 0; i<len; i++){
 		if (buffer[i] == '\n'){
 			buffer[i] = '\0';
 		}
 	}
 
-	for(i=0;i<len;i++){
+	for(i=0; i<len; i++){
 		if(buffer[i] == ' ') {
 			buffer[i] = '\0';
 			argv[j++] = buffer + i + 1;
@@ -301,11 +310,13 @@ ssize_t syscall_proc_write(struct file *filp, const char *buff, size_t len, loff
 		break;
 	default: 
 		mutex_unlock(&syscall_proc_file_lock);
+		kfree(buffer);
 		return -EBADMSG;
 	}
 	
 	if (ret < 0){
 			mutex_unlock(&syscall_proc_file_lock);
+			kfree(buffer);
 			return ret;
 	}
 
@@ -315,31 +326,53 @@ ssize_t syscall_proc_write(struct file *filp, const char *buff, size_t len, loff
 	AUDIT
 	printk("%s[%s]: the administrator requested this %s\n", MODNAME, __func__, buffer);
 	mutex_unlock(&syscall_proc_file_lock);
+	kfree(buffer);
 	return (ssize_t)len;
 }
 
 ssize_t syscall_proc_read(struct file *filp, char *buff, size_t len, loff_t *off)
 {
-        int to_copy;
-		int not_copied;
-		
-		mutex_lock(&syscall_proc_file_lock);
-		if (*off >= sizeof(VFS_SYSCALL_MSG)){
-			mutex_unlock(&syscall_proc_file_lock);
-			return 0; //
-		}
-		
-		pr_info("vfs: says len %ld sizeof %ld\n", len, sizeof(VFS_SYSCALL_MSG));
-		to_copy = min(len, (size_t)(sizeof(VFS_SYSCALL_MSG) - *off));
-		
-		not_copied = copy_to_user(buff, VFS_SYSCALL_MSG + *off, to_copy);
-		pr_info("info: to_copy = %d not copied %d=\n", to_copy, not_copied);
-		
-		
-		*off += to_copy - not_copied;
-		
-		mutex_unlock(&syscall_proc_file_lock);
-		return to_copy - not_copied;
+    char *temp_buffer;
+    int to_copy;
+	int not_copied;
+	int i = 0;
+    struct rcu_restrict *entry;
+    int written = 0;
+
+    temp_buffer = kmalloc(PATH_MAX, GFP_KERNEL);
+    if (!temp_buffer) {
+        pr_err("Failed to allocate memory\n");
+        return -ENOMEM;
+    }
+
+    mutex_lock(&syscall_proc_file_lock);
+
+    if (*off >= PATH_MAX) {
+        mutex_unlock(&syscall_proc_file_lock);
+        kfree(temp_buffer); 
+        return 0;
+    }
+
+    rcu_read_lock();
+    list_for_each_entry_rcu(entry, &restrict_path_list, node) {
+        if (written < PATH_MAX) {
+            written += scnprintf(temp_buffer + written, PATH_MAX - written,
+                                 "(i=%d, path=%s)\n", i++, entry->path);
+        }
+    }
+    rcu_read_unlock();
+
+    pr_info("vfs: says len %ld, available buffer size %d\n", len, written);
+
+    to_copy = min(len, (size_t)(written - *off));
+    not_copied = copy_to_user(buff, temp_buffer + *off, to_copy);
+
+    *off += to_copy - not_copied;
+
+    mutex_unlock(&syscall_proc_file_lock);
+
+    kfree(temp_buffer); 
+    return to_copy - not_copied;
 }
 
 

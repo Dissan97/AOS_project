@@ -25,9 +25,12 @@
 #include <linux/namei.h>
 #include <linux/dcache.h>
 #include <linux/path.h>
+
+
 #include "include/reference_hooks.h"
 #include "include/reference_rcu_restrict_list.h"
 #include "include/reference_defer.h"
+#include "include/reference_path_solver.h"
 
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("Dissan Uddin Ahmed <dissanahmed@gmail.com>");
@@ -57,7 +60,7 @@ char *get_full_user_path(int dfd, const __user char *user_path) {
 
     full_path = d_path(&path_struct, dummy_path, PATH_MAX);
     path_put(&path_struct);
-    kfree(dummy_path);
+    //kfree(dummy_path);
     return full_path;
 }
 
@@ -76,119 +79,108 @@ void mark_inode_read_only(struct inode *inode)
     inode->i_mode &= ~S_IWGRP;
     inode->i_mode &= ~S_IWOTH;
     inode->i_flags |= S_IMMUTABLE;
+	mark_inode_dirty(inode);
 }
 
+struct fs_struct {
+	int users;
+	spinlock_t lock;
+	seqcount_t seq;
+	int umask;
+	int in_exec;
+	struct path root, pwd;
+} __randomize_layout;
+
+
+int absolute_path_from_pwd(char *filename){
+	struct path path;
+	char *buffer;
+	char temp[NAME_MAX];
+	char *abs;
+
+	buffer = kmalloc(PATH_MAX, GFP_KERNEL);
+
+	if (!buffer){
+		pr_err("%s[%s]: kernel non mem\n", MODNAME, __func__);
+		return -ENOMEM;
+	}	
+
+	strncpy(temp, filename, NAME_MAX);
+	memset(filename, 0, PATH_MAX);
+	path = current->fs->pwd;
+	abs = dentry_path_raw(path.dentry, buffer, PATH_MAX);
+	snprintf(filename, PATH_MAX, "%s/%s", abs, temp);
+	kfree(buffer);
+	return 0;
+}
 
 int pre_do_filp_open_handler(struct kprobe *ri, struct pt_regs * regs)
 {
-
-#if defined(__x86_64__)
-    int dfd = (int)(regs->di); // arg0
-    const __user char *user_path = ((struct filename *)(regs->si))->uptr; // arg1
-    const char *real_path = ((struct filename *)(regs->si))->name;
-    struct open_flags *op_flag = (struct open_flags *)(regs->dx); // arg2
-
-#elif defined(__aarch64__)
-    int dfd = (int)(regs->regs[0]); // arg0 (dfd)
-    const __user char *user_path = ((struct filename *)(regs->regs[1]))->uptr; // arg1 
-    const char *real_path = ((struct filename *)(regs->regs[1]))->name;
-    struct open_flags *op_flag = (struct open_flags *)(regs->regs[2]); // arg2 (open_flags)
-
-#elif defined(__i386__)
-    // x86 32-bit
-    int dfd = (int)(regs->bx); // arg0 (dfd)
-    const __user char *user_path = ((struct filename *)(regs->cx))->uptr; // arg1 
-    const char *real_path = ((struct filename *)(regs->cx))->name;
-    struct open_flags *op_flag = (struct open_flags *)(regs->dx); // arg2 (open_flags)
-
-#elif defined(__arm__)
-    // ARM 32-bit
-    int dfd = (int)(regs->ARM_r0); // arg0 (dfd)
-    const __user char *user_path = ((struct filename *)(regs->ARM_r1))->uptr; // arg1 
-    const char *real_path = ((struct filename *)(regs->ARM_r1))->name;
-    struct open_flags *op_flag = (struct open_flags *)(regs->ARM_r2); // arg2 (open_flags)
-#endif
-
-    	char *full_path;
+    struct filename *pathname = (struct filename *)regs->si; 
+	struct open_flags *op_flag = (struct open_flags *)(regs->dx); // arg2
+    const char *filename = pathname->name;
+    struct path path;
+    char *buffer;
+    char *abs_path;
+    int ret;
 	int flags = op_flag -> open_flag;
-	int is_allowed;
-	struct path path;
-	
-	struct black_list_op i_info;
-	int is_dir = 0;
-	char *last_slash;
-	unsigned long old_len;
-	int exists = 1;
+	int is_parent = 0;
 
-	
-	// they are just opening in read mode no problem here
-	if (!(flags & FORBITTEN_MASK)){
+
+	if (filename == NULL){
 		return 0;
 	}
 
-	if (user_path == NULL) {
-        full_path = (char *)real_path;
-    } else {
-        full_path = get_full_user_path(dfd, user_path);
-        if (full_path == NULL) {
-        	full_path = (char *)real_path;
-		exists = 0;
-        }
+	// for routine execution avoid to much overhead
+	if (forbitten_path(filename)){
+		return 0;
+	}
+	
+    buffer = kmalloc(PATH_MAX, GFP_KERNEL);
+    if (!buffer) {
+        pr_err("%s[%s]: kmalloc error\n", MODNAME, __func__);
+		goto do_filp_open_pre_handler_mem_problem;
     }
-	
-	if (forbitten_path(full_path)){
+
+	if (pathname->uptr == NULL){
+		pr_err("DISSAN DICE: filename null\n");
+		kfree(buffer);
 		return 0;
 	}
-	// todo add check if exists and then retrieve the directory by pwd() if there is no slash
-	if (kern_path(full_path, LOOKUP_FOLLOW, &path)){
-		//path does not exist
-		last_slash = strrchr(full_path, '/');
-		if (!last_slash){
-			// nor the father exists
-			return 0;
-		}
-		old_len = strlen(full_path);
-		*last_slash = '\0';
-		memset(last_slash, 0, old_len - strlen(full_path));
-		if (kern_path(full_path, LOOKUP_FOLLOW, &path)){
-			//pr_warn("%s[%s]: unable to find struct path for %s\n", MODNAME, __func__, full_path);
-			return 0;
-		}
-
-		is_dir = 1;
+	if (copy_from_user(buffer, pathname->uptr, PATH_MAX)){
+		pr_err("dissan dice fallito\n");
+		kfree(buffer);
+		return 0;
 	}
-
-	//pr_warn("dissan: stiamo dopo is_dir %d\n", is_dir);
-
-	//additional check avoid null pointer
-
-	if (likely(!path.dentry)){
-		//dentry is null
+	ret = get_filter_swap_or_parent(buffer, &is_parent);
+	if (ret){
+		kfree(buffer);
+		if (ret == -ENOMEM){
+			goto do_filp_open_pre_handler_mem_problem;
+		}
 		return 0;
 	}
 
-	is_allowed = is_black_listed(full_path, path.dentry->d_inode->i_ino, &i_info);
-
-	if (!is_allowed){
-		// the path is not black listed
-		pr_err("dissan: is allowed full %s\n", full_path);
-		if (is_dir){
-			pr_err("%s[%s]: cannot create file in this protected directory %s\n",MODNAME, __func__, full_path);	
-		}else {
-			pr_err("%s[%s]: the file %s cannot be modified\n",MODNAME, __func__, full_path);
-		}
-		mark_inode_read_only(path.dentry->d_inode);	
-		goto do_filp_open_defer_work;
-	}
+	pr_info("dissan dice: path=%s, aperto in write=%d, creat%d, append=%d, trunc=%d, readwrite=%d is_parent=%d\n", 
+	buffer, (flags & O_WRONLY) != 0, (flags & O_CREAT) != 0, (flags & O_APPEND) != 0, (flags & O_TRUNC) != 0,
+	(flags & O_RDWR) != 0, is_parent);
 
 	return 0;
+	ret = check_black_list(buffer);
 
+    
+
+
+    // Libera il buffer
+    kfree(buffer);
+    return 0;
 
 do_filp_open_defer_work:
 	AUDIT
 	pr_info("%s[%s]: calling work queue", MODNAME, __func__);
 	defer_top_half(defer_bottom_half);
 	//setting up bad file descriptor to make fail do_filp_open
+do_filp_open_pre_handler_mem_problem:
 #if defined(__x86_64__)
     regs->di = -1;
 #elif defined(__aarch64__)
@@ -203,8 +195,7 @@ do_filp_open_defer_work:
 	return 0;
 }
 
-
-//todo change unlink
+//todo check unlink
 
 int pre_vfs_mk_rmdir_and_unlink_handler(struct kprobe *ri, struct pt_regs * regs)
 {
@@ -221,11 +212,10 @@ int pre_vfs_mk_rmdir_and_unlink_handler(struct kprobe *ri, struct pt_regs * regs
     struct dentry *dentry = (struct dentry *)regs->ARM_r1;  // ARM (32-bit): Second argument is in `r1` (ARM_r1)
 #endif
 	struct dentry *parent_dentry;
-	struct black_list_op i_info;
 	char *parent_full_path;
 	char *dummy;
-
-
+	//todo pay attention to avoid kernel crash
+	return 0;
 	// check the dentry if 
 	if (likely(dentry)){
 		
@@ -241,7 +231,15 @@ int pre_vfs_mk_rmdir_and_unlink_handler(struct kprobe *ri, struct pt_regs * regs
 			}
 
 			parent_full_path = dentry_path_raw(parent_dentry, dummy, MAX_FILE_NAME);
-			if (!is_black_listed(parent_full_path, 0, &i_info)){
+
+			if (parent_full_path == NULL){
+				return 0;
+			}
+
+			if (forbitten_path(parent_full_path)){
+				return 0;
+			}
+			if (check_black_list(parent_full_path) == EEXIST){
 				atomic_inc((atomic_t*)&audit_counter);
 				pr_err("%s[%s]: cannot cannot (CREATE | REMOVE) files in this for directory %s\n", MODNAME, __func__, parent_dentry->d_name.name);
 				mark_inode_read_only(parent_dentry->d_inode);

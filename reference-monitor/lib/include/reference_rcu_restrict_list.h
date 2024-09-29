@@ -7,7 +7,8 @@
 #include <linux/rculist.h>
 #include <linux/fs.h>
 #include <linux/stat.h>
-
+#include <linux/dcache.h>
+#include <linux/path.h>
 #define RDONLY_MAKS ~(S_IWUSR | S_IWGRP | S_IWOTH)
 
 struct rcu_restrict {
@@ -20,20 +21,15 @@ struct rcu_restrict {
 };
 
 
-struct black_list_op {
-  unsigned int mode;
-  unsigned int flags;
-};
-
 extern spinlock_t restrict_path_lock;
 extern struct list_head restrict_path_list;
 //wait free
 
 int forbitten_path(const char *);
 int restore_black_list_entries (void);
-int add_path(char *);
+int add_path(char *the_path, struct path path);
 int del_path(char *);
-int is_black_listed(const char *path, unsigned long, struct black_list_op *i_info);
+int check_black_list(const char *path);
 
 
 

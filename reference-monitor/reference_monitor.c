@@ -181,7 +181,7 @@ asmlinkage long sys_change_paths(char * pwd, char *path, int op){
 #endif
         int ret;
         char from_user_password[MAX_FROM_USER] = {0};
-        char from_user_path[MAX_FROM_USER] = {0};
+        char *from_user_path;
         if (pwd == NULL || path == NULL){
                 pr_err("%s[%s]: path or password cannot be NULL\n", MODNAME, __func__);
                 return -EINVAL;
@@ -191,12 +191,20 @@ asmlinkage long sys_change_paths(char * pwd, char *path, int op){
                 pr_warn("%s[%s]: cannot copy from the user the password\n", MODNAME, __func__);
                 return -EINVAL;
         }
+
+        from_user_path = kzalloc(PATH_MAX, GFP_KERNEL);
+        if (!from_user_path){
+                return -ENOMEM;
+        }
+
         ret = copy_from_user(from_user_path, path, MAX_FROM_USER);
         if (ret < 0){
                 pr_warn("%s[%s]: cannot copy from the user the path\n", MODNAME, __func__);
                 return -EINVAL;
         }
-        return do_change_path(from_user_password, from_user_path, op);
+        ret = do_change_path(from_user_password, from_user_path, op);
+        kfree(from_user_path);
+        return ret;
 }
 
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(4,17,0)

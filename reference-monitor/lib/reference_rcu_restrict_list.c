@@ -18,6 +18,9 @@ const char *sys = "/sys";
 const char *run = "/run";
 const char *var = "/var";
 const char *tmp = "/tmp";
+const char *bin = "/bin";
+const char *etc = "/etc";
+const char *lib = "/lib";
 
 
 int is_path_in(const char *the_path)
@@ -69,15 +72,13 @@ int restore_black_list_entries (void)
         return ret;
 }
 
-int add_path(char *the_path)
+int add_path(char *the_path, struct path path) // here is passed absolute path
 {
 
         struct rcu_restrict *entry;
-        struct path path;
         int err;
         long len;
-        char *absolute_path;
-        char *buf;
+
         if (!the_path){
                 return -EINVAL;
         }
@@ -85,47 +86,28 @@ int add_path(char *the_path)
         if (!is_path_in(the_path)){
                 return -EEXIST;
         }
+        
+        if (err){
+                pr_warn("%s[%s]: the path provided does not exists\n", MODNAME, __func__);
+                return err;
+        }
 
         entry = kzalloc(sizeof(struct rcu_restrict), GFP_KERNEL);
         if (!entry){
                 pr_err("%s[%s]: cannot alloc memory for struct path\n",MODNAME, RCU_RESTRICT_LIST);
                 return -ENOMEM;
         }
-        
-        err = kern_path(the_path, LOOKUP_FOLLOW, &path);
-        
-        if (err){
-                kfree(entry);
-                return err;
-        }
 
-        buf = (char *)kzalloc(PATH_MAX, GFP_KERNEL);
-        if (!buf) {
-                pr_warn("%s[%s]: Failed to allocate memory\n", MODNAME, __func__);
-                path_put(&path);
-                return -ENOMEM;
-        }
 
-        absolute_path = dentry_path_raw(path.dentry, buf, PATH_MAX);
-        if (IS_ERR(absolute_path)) {
-                pr_warn("%s[%s]: Failed to get absolute path\n", MODNAME, __func__);
-                kfree(entry);
-                kfree(buf);
-                path_put(&path);
-                return PTR_ERR(absolute_path);
-        }
-
-        len = strlen(absolute_path);
+        len = strlen(the_path);
         entry->path = kzalloc(sizeof(char)*(len + 1), GFP_KERNEL);
         
         if (!entry->path){
                 pr_warn("%s[%s]: cannot alloc memory to insert new path\n",MODNAME, RCU_RESTRICT_LIST);
                 kfree(entry);
-                kfree(buf);
                 return -ENOMEM;
         }
-        strncpy(entry->path, absolute_path, len);
-        kfree(buf);
+        strncpy(entry->path, the_path, len);
         pr_info("%s[%s]: adding this path: %s entry->path\n", MODNAME, __func__, entry->path);
 
         if (!path.dentry->d_inode){
@@ -133,7 +115,6 @@ int add_path(char *the_path)
                 kfree(entry);
                 return -EEXIST;
         }
-
 
         inode_lock_shared(path.dentry->d_inode);
         entry->i_ino = path.dentry->d_inode->i_ino;   
@@ -144,6 +125,7 @@ int add_path(char *the_path)
         spin_lock(&restrict_path_lock);
         list_add_rcu(&entry->node, &restrict_path_list);
         spin_unlock(&restrict_path_lock);
+        path_put(&path);
 
         return 0;
 }
@@ -153,48 +135,32 @@ int add_path(char *the_path)
 int del_path(char *the_path)
 {
         struct rcu_restrict *entry;
-        struct path path;
         long len;
-        char *absolute_path;
-        char *buf;
         int err;
-
+        struct path path;
+        int ret=0;
         if (!the_path){
                 return -EINVAL;
         }
 
-        err = kern_path(the_path, LOOKUP_FOLLOW, &path);
+        
+
         if (err){
                 pr_warn("%s[%s]: the path=%s provided not exist", MODNAME, __func__, the_path);
                 return -ENOENT;
         }
-        buf = (char *)kzalloc(PATH_MAX, GFP_KERNEL);
-        if (!buf) {
-                pr_warn("%s[%s]: Failed to allocate memory\n", MODNAME, __func__);
-                path_put(&path);
-                return -ENOMEM;
-        }
-
-        absolute_path = dentry_path_raw(path.dentry, buf, PATH_MAX);
-        if (IS_ERR(absolute_path)) {
-                pr_warn("%s[%s]: Failed to get absolute path\n", MODNAME, __func__);
-                kfree(buf);
-                path_put(&path);
-                return PTR_ERR(absolute_path);
-        }
-
-	
-        len = strlen(absolute_path);
+        	
+        len = strlen(the_path);
         spin_lock(&restrict_path_lock);
         list_for_each_entry(entry, &restrict_path_list, node){
-                if (!strncmp(absolute_path, entry->path, len)){
+                if (!strncmp(the_path, entry->path, len)){
                         
-                        if (kern_path(entry->path, LOOKUP_FOLLOW, &path)) {
-				kfree(buf);
-                                return -ENOENT;
+                        if ((ret = kern_path(entry->path, LOOKUP_FOLLOW, &path))) {
+                                goto delete_not_exists_kernel_path;
                         }
                         if (!path.dentry->d_inode){
-				kfree(buf);
+                                path_put(&path);
+                                goto delete_not_exists_kernel_path;
                                 return -ENOENT;
                         }       
                         
@@ -204,18 +170,17 @@ int del_path(char *the_path)
                         path.dentry->d_inode-> i_mtime = current_time(path.dentry->d_inode);
                         path.dentry->d_inode-> i_atime = current_time(path.dentry->d_inode);
                         mark_inode_dirty(path.dentry->d_inode);
-                        
+                        path_put(&path);
+delete_not_exists_kernel_path:                        
                         list_del_rcu(&entry->node);
                         spin_unlock(&restrict_path_lock);
                         synchronize_rcu();
                         kfree(entry->path);
                         kfree(entry);
-			kfree(buf);
-                        return 0;
+                        return ret;
                 }
         }
         spin_unlock(&restrict_path_lock);
-	kfree(buf);
 
    return -ENOENT;   
 }
@@ -231,27 +196,30 @@ int forbitten_path(const char *the_path){
         strncmp(the_path, run, 4) == 0 ||
         strncmp(the_path, var, 4) == 0 ||
         strncmp(the_path, tmp, 4) == 0 ||
+        strncmp(the_path, bin, 4) == 0 ||
+        strncmp(the_path, etc, 4) == 0 ||
+        strncmp(the_path, lib, 4) == 0 ||
         strcmp(single_file_name, the_path) == 0) ? 1 : 0;
 }
 
 
-int is_black_listed(const char *path, unsigned long i_ino, struct black_list_op *i_info)
+int check_black_list(const char *path)
 {
 
         struct rcu_restrict *entry;
+        struct path target_path;
+        
+        
         if (!path){
                 return -EINVAL;
         }
         
         rcu_read_lock();
         list_for_each_entry_rcu(entry, &restrict_path_list, node) {
-		if(!strcmp(path, entry->path) || entry->i_ino == i_ino) {
-                        i_info->mode = entry->o_mode;
-                        i_info->flags = entry->o_flags;
+		if(!strcmp(path, entry->path)) {
 			rcu_read_unlock();
 			return 0;
-		}
-                
+		}        
 	}
 	rcu_read_unlock();
         return -EEXIST;

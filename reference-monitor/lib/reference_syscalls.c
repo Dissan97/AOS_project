@@ -10,12 +10,14 @@
 #include <linux/uidgid.h>
 #include <linux/atomic.h>
 #include <linux/rwlock.h>
+
+
 #include "include/reference_types.h"
 #include "include/reference_hooks.h"
 #include "include/reference_syscalls.h"
 #include "include/reference_rcu_restrict_list.h"
 #include "include/reference_hash.h"
-
+#include "include/reference_path_solver.h"
 #define REFERENCE_SYSCALLS "REFERENCE SYSCALLS"
 /**
  * @param state: int it allow to change_the current state of the reference monitor
@@ -141,8 +143,7 @@ int do_change_path(char *the_pwd, char *the_path, int op)
 
         int ret = 0;
         long old_state;
-        
-        
+        struct path path;
         const struct cred *cred;
         
         cred = current_cred();
@@ -162,14 +163,27 @@ int do_change_path(char *the_pwd, char *the_path, int op)
                 return -EINVAL;
         }
 
+        if ((ret = check_pwd(the_pwd))){
+                return -EACCES;
+        }; 
+
+        ret = fill_absolute_path(the_path);
+        if (ret){
+                pr_warn("%s[%s]: cannot get absolute path\n", MODNAME, __func__);
+                return ret;
+        }
 
         if (forbitten_path(the_path)){
                 pr_warn("%s[%s]: required forbitten path=%s\n", MODNAME, __func__, the_path);
                 return -EINVAL;
         }
-        if ((ret = check_pwd(the_pwd))){
-                return -EACCES;
-        }; 
+
+        ret = kern_path(the_path, LOOKUP_FOLLOW, &path);
+        if (ret){
+                pr_warn("%s[%s]: the path=%s provided does not exists\n", MODNAME, __func__, the_path);
+                return ret;
+        }
+        
 
 #ifdef NO_LOCK
     old_state = atomic_long_read(&atomic_current_state);
@@ -185,7 +199,7 @@ int do_change_path(char *the_pwd, char *the_path, int op)
         }
         
         if (op & ADD_PATH){
-                ret = add_path(the_path);
+                ret = add_path(the_path, path);
                 AUDIT {
                         if (!ret){
                                 pr_info("%s[%s]: %s added successfully\n", MODNAME, __func__, the_path);
@@ -200,7 +214,7 @@ int do_change_path(char *the_pwd, char *the_path, int op)
                         }
                 }
         }
-        
+        path_put(&path);
         return ret;
 }
 
