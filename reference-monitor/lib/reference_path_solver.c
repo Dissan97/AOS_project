@@ -142,3 +142,59 @@ int path_struct(char *pathname, struct path *path, int flag)
 {
     return 0;
 }
+
+void mark_inode_read_only(struct inode *inode)
+{
+    
+    inode->i_mode &= ~S_IWUSR;
+    inode->i_mode &= ~S_IWGRP;
+    inode->i_mode &= ~S_IWOTH;
+    inode->i_flags |= S_IMMUTABLE;
+	mark_inode_dirty(inode);
+}
+
+int mark_indoe_read_only_by_pathname(char *pathname)
+{
+    struct path path;
+    int ret;
+    ret = kern_path(pathname, LOOKUP_FOLLOW, &path);
+    if (ret){
+        return ret;
+    }
+
+    if (!path.dentry){
+        return -ENOENT;
+    }
+
+    mark_inode_read_only(path.dentry->d_inode);
+    path_put(&path);
+    return 0;
+}
+
+int fill_path_by_dentry(struct dentry *dentry, char *pathname){
+    char *buffer;
+    char *absolute_path;
+    buffer = kzalloc(PATH_MAX, GFP_KERNEL);
+    
+    if (!dentry){
+        return -EINVAL;
+    }
+
+    if (!buffer){
+        pr_err("%s[%s]: kernel out of memory\n", MODNAME, __func__);
+        return -ENOMEM;
+    }
+
+    absolute_path = dentry_path_raw(dentry, buffer, PATH_MAX);
+    if (IS_ERR(absolute_path)){
+        kfree(buffer);
+        return -ENOENT;
+    }
+
+    memset(pathname, 0, PATH_MAX);
+    strncpy(pathname, absolute_path, strlen(absolute_path));
+    kfree(buffer);
+    return 0;
+
+
+}

@@ -167,23 +167,6 @@ int do_change_path(char *the_pwd, char *the_path, int op)
                 return -EACCES;
         }; 
 
-        ret = fill_absolute_path(the_path);
-        if (ret){
-                pr_warn("%s[%s]: cannot get absolute path\n", MODNAME, __func__);
-                return ret;
-        }
-
-        if (forbitten_path(the_path)){
-                pr_warn("%s[%s]: required forbitten path=%s\n", MODNAME, __func__, the_path);
-                return -EINVAL;
-        }
-
-        ret = kern_path(the_path, LOOKUP_FOLLOW, &path);
-        if (ret){
-                pr_warn("%s[%s]: the path=%s provided does not exists\n", MODNAME, __func__, the_path);
-                return ret;
-        }
-        
 
 #ifdef NO_LOCK
     old_state = atomic_long_read(&atomic_current_state);
@@ -198,6 +181,23 @@ int do_change_path(char *the_pwd, char *the_path, int op)
                 return  -ECANCELED;
         }
         
+        ret = fill_absolute_path(the_path);
+        if (ret){
+                pr_warn("%s[%s]: cannot get absolute path\n", MODNAME, __func__);
+                return ret;
+        }
+        
+        if (forbitten_path(the_path)){
+                pr_warn("%s[%s]: required forbitten path=%s\n", MODNAME, __func__, the_path);
+                return -EINVAL;
+        }
+
+        ret = kern_path(the_path, LOOKUP_FOLLOW, &path);
+        if (ret){
+                pr_warn("%s[%s]: the path=%s provided does not exists\n", MODNAME, __func__, the_path);
+                return ret;
+        }
+
         if (op & ADD_PATH){
                 ret = add_path(the_path, path);
                 AUDIT {

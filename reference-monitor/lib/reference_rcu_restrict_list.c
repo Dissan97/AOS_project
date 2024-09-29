@@ -208,18 +208,34 @@ int check_black_list(const char *path)
 
         struct rcu_restrict *entry;
         struct path target_path;
-        
+        int err = 1;
         
         if (!path){
                 return -EINVAL;
         }
         
+        err = kern_path(path, LOOKUP_FOLLOW, &target_path);
+
         rcu_read_lock();
         list_for_each_entry_rcu(entry, &restrict_path_list, node) {
 		if(!strcmp(path, entry->path)) {
 			rcu_read_unlock();
+                        if (!err){
+                                path_put(&target_path);
+                        }
 			return 0;
-		}        
+		}
+                // whatever if the path exists in black list check for hardlinks
+                if (!err){
+                        if (target_path.dentry){
+                                if (entry->i_ino == target_path.dentry->d_inode->i_ino){
+                                        rcu_read_unlock();
+                                        path_put(&target_path);
+                                        return 0;
+                                }
+                        }
+                }
+
 	}
 	rcu_read_unlock();
         return -EEXIST;

@@ -159,9 +159,16 @@ int change_path_vfs_sys_wrapper(char *argv[], int format)
 	char *pathname = NULL;
 	int op = -1;
 	int i;
+	int ret;
 	
 	if (format != 6){
 		return -EINVAL;
+	}
+
+	pathname = kzalloc(PATH_MAX, GFP_KERNEL);
+	if (!pathname) {
+		pr_err("%s[%s]: kernel out of memory\n", MODNAME, __func__);
+		return -ENOMEM;
 	}
 
 	i = 0;
@@ -170,7 +177,14 @@ int change_path_vfs_sys_wrapper(char *argv[], int format)
 			pwd = argv[i + 1];
 		}
 		if (!strncmp(argv[i], PTH, 4)){
-			pathname = argv[i + 1];
+			if (argv[i + 1] == NULL){
+				return -EINVAL;
+			}
+
+			if (strcmp(argv[i + 1],"(null)") == 0){
+				return -EINVAL;
+			}
+			strncpy(pathname, argv[i + 1], strlen(argv[i + 1]));
 		}
 		if (!strncmp(argv[i], OPT, 4)){
 			op = parse_opt(argv[i + 1]);
@@ -180,24 +194,20 @@ int change_path_vfs_sys_wrapper(char *argv[], int format)
 	AUDIT
 	pr_info("%s[%s]: calling the sys_change_path with pwd=%s, path=%s, op=%d\n", MODNAME, __func__,
 	pwd, pathname, op);
-	
-	if (pathname == NULL){
-		return -EINVAL;
-	}
-
-	if (strcmp(pathname,"(null)") == 0){
-		return -EINVAL;
-	}
 
 	if (pwd == NULL){
+		kfree(pathname);
 		return -EINVAL;
 	}
 
 	if (strcmp(pwd,"(null)") == 0){
+		kfree(pathname);
 		return -EINVAL;
 	}
 	
-	return do_change_path(pwd, pathname, op);
+	ret = do_change_path(pwd, pathname, op);
+	kfree(pathname);
+	return ret;
 }
 
 int change_password_vfs_sys_wrapper(char *argv[], int format){
@@ -250,7 +260,7 @@ ssize_t syscall_proc_write(struct file *filp, const char *buff, size_t len, loff
 	int i;
     int j;
 	int ret;
-	char *argv[9] = {0};
+	char *argv[16];
 	int format = 0;
 	
 	//cngpth -pwd password -opt ADD_PATH -pth pathname
@@ -270,6 +280,15 @@ ssize_t syscall_proc_write(struct file *filp, const char *buff, size_t len, loff
 
 	mutex_lock(&syscall_proc_file_lock);
 	ret = copy_from_user(buffer, buff, len);
+	
+	if (ret){
+		pr_err("%s[%s]: cannot copy from user\n", MODNAME, __func__);
+		kfree(buffer);
+		mutex_unlock(&syscall_proc_file_lock);
+		return -1;
+	}
+	
+
 	buffer[len] = '\0';
 	j = 1;
 

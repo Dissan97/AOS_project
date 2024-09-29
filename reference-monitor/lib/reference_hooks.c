@@ -39,6 +39,8 @@ MODULE_AUTHOR("Dissan Uddin Ahmed <dissanahmed@gmail.com>");
 struct path dummy_path;
 struct dentry dummy_dentry;
 
+
+
 #define FORBITTEN_MASK (O_CREAT | O_RDWR | O_WRONLY | O_TRUNC | O_APPEND)
 #define COMMON_MASK 0x8000 
 
@@ -72,60 +74,17 @@ struct open_flags {
 	int lookup_flags;
 };
 
-void mark_inode_read_only(struct inode *inode)
-{
-    
-    inode->i_mode &= ~S_IWUSR;
-    inode->i_mode &= ~S_IWGRP;
-    inode->i_mode &= ~S_IWOTH;
-    inode->i_flags |= S_IMMUTABLE;
-	mark_inode_dirty(inode);
-}
 
-struct fs_struct {
-	int users;
-	spinlock_t lock;
-	seqcount_t seq;
-	int umask;
-	int in_exec;
-	struct path root, pwd;
-} __randomize_layout;
-
-
-int absolute_path_from_pwd(char *filename){
-	struct path path;
-	char *buffer;
-	char temp[NAME_MAX];
-	char *abs;
-
-	buffer = kmalloc(PATH_MAX, GFP_KERNEL);
-
-	if (!buffer){
-		pr_err("%s[%s]: kernel non mem\n", MODNAME, __func__);
-		return -ENOMEM;
-	}	
-
-	strncpy(temp, filename, NAME_MAX);
-	memset(filename, 0, PATH_MAX);
-	path = current->fs->pwd;
-	abs = dentry_path_raw(path.dentry, buffer, PATH_MAX);
-	snprintf(filename, PATH_MAX, "%s/%s", abs, temp);
-	kfree(buffer);
-	return 0;
-}
 
 int pre_do_filp_open_handler(struct kprobe *ri, struct pt_regs * regs)
 {
     struct filename *pathname = (struct filename *)regs->si; 
 	struct open_flags *op_flag = (struct open_flags *)(regs->dx); // arg2
     const char *filename = pathname->name;
-    struct path path;
     char *buffer;
-    char *abs_path;
     int ret;
 	int flags = op_flag -> open_flag;
 	int is_parent = 0;
-
 
 	if (filename == NULL){
 		return 0;
@@ -143,12 +102,10 @@ int pre_do_filp_open_handler(struct kprobe *ri, struct pt_regs * regs)
     }
 
 	if (pathname->uptr == NULL){
-		pr_err("DISSAN DICE: filename null\n");
 		kfree(buffer);
 		return 0;
 	}
 	if (copy_from_user(buffer, pathname->uptr, PATH_MAX)){
-		pr_err("dissan dice fallito\n");
 		kfree(buffer);
 		return 0;
 	}
@@ -161,21 +118,33 @@ int pre_do_filp_open_handler(struct kprobe *ri, struct pt_regs * regs)
 		return 0;
 	}
 
-	pr_info("dissan dice: path=%s, aperto in write=%d, creat%d, append=%d, trunc=%d, readwrite=%d is_parent=%d\n", 
-	buffer, (flags & O_WRONLY) != 0, (flags & O_CREAT) != 0, (flags & O_APPEND) != 0, (flags & O_TRUNC) != 0,
-	(flags & O_RDWR) != 0, is_parent);
-
-	return 0;
 	ret = check_black_list(buffer);
 
+	if (!ret){
+		
+			if (is_parent){
+				if (flags & (O_CREAT | O_TMPFILE)){
+					pr_err("%s[%s]: cannot create create file in this path=%s\n", MODNAME, __func__, buffer);
+					goto do_filp_open_defer_work;
+				}
+			}else {
+				if (flags & (O_RDWR | O_WRONLY | O_TRUNC | O_APPEND)){
+					pr_err("%s[%s]: the file =%s cannot be modified\n", MODNAME, __func__, buffer);
+					goto do_filp_open_defer_work;
+				}
+			}
+	}
     
-
-
-    // Libera il buffer
     kfree(buffer);
     return 0;
 
 do_filp_open_defer_work:
+	if (mark_indoe_read_only_by_pathname(buffer)){
+		pr_err("%s[%s]: unable to find inode for this pathname=%s\n", MODNAME, __func__, buffer);
+		kfree(buffer);
+		return 0;
+	}
+    kfree(buffer);
 	AUDIT
 	pr_info("%s[%s]: calling work queue", MODNAME, __func__);
 	defer_top_half(defer_bottom_half);
@@ -183,14 +152,16 @@ do_filp_open_defer_work:
 do_filp_open_pre_handler_mem_problem:
 #if defined(__x86_64__)
     regs->di = -1;
+    ((struct open_flags *)(regs->dx))->open_flag = 0xFFFFFFFF;
 #elif defined(__aarch64__)
-    regs->regs[0] = -1; 
-
+    regs->regs[0] = -1;
+    ((struct open_flags *)(regs->regs[1]))->open_flag = 0xFFFFFFFF;
 #elif defined(__i386__)
-    regs->bx = -1;  
-
+    regs->bx = -1;
+    ((struct open_flags *)(regs->cx))->open_flag = 0xFFFFFFFF;
 #elif defined(__arm__)
-    regs->ARM_r0 = -1;  
+    regs->ARM_r0 = -1;
+    ((struct open_flags *)(regs->ARM_r1))->open_flag = 0xFFFFFFFF;
 #endif
 	return 0;
 }
@@ -211,48 +182,32 @@ int pre_vfs_mk_rmdir_and_unlink_handler(struct kprobe *ri, struct pt_regs * regs
 #elif defined(__arm__)
     struct dentry *dentry = (struct dentry *)regs->ARM_r1;  // ARM (32-bit): Second argument is in `r1` (ARM_r1)
 #endif
-	struct dentry *parent_dentry;
-	char *parent_full_path;
-	char *dummy;
-	//todo pay attention to avoid kernel crash
-	return 0;
+	char *buffer;
+	int ret;
+
+	buffer = kzalloc(PATH_MAX, GFP_KERNEL);
+	if (!buffer){
+		pr_err("%s[%s]: kernel out of memory\n", MODNAME, __func__);
+		return -ENOMEM;
+	}
 	// check the dentry if 
 	if (likely(dentry)){
-		
-		parent_dentry = dentry->d_parent;
-		// 
-		if (parent_dentry){
-
-			dummy = kmalloc(MAX_FILE_NAME, GFP_KERNEL);
-
-			if (!dummy){
-				pr_err("%s[%s]: Cannot allocate dummy with kmalloc\n", MODNAME, __func__);
-				return -ENOMEM;
-			}
-
-			parent_full_path = dentry_path_raw(parent_dentry, dummy, MAX_FILE_NAME);
-
-			if (parent_full_path == NULL){
-				return 0;
-			}
-
-			if (forbitten_path(parent_full_path)){
-				return 0;
-			}
-			if (check_black_list(parent_full_path) == EEXIST){
-				atomic_inc((atomic_t*)&audit_counter);
-				pr_err("%s[%s]: cannot cannot (CREATE | REMOVE) files in this for directory %s\n", MODNAME, __func__, parent_dentry->d_name.name);
-				mark_inode_read_only(parent_dentry->d_inode);
+		if (dentry->d_parent){
+			ret = fill_path_by_dentry(dentry->d_parent, buffer);
+			if (!check_black_list(buffer)){
+				pr_err("%s[%s]: cannot modify this directory=%s\n", MODNAME, __func__, buffer);
+				mark_inode_read_only(dentry->d_parent->d_inode);
 				goto store_thread_info_mkrmdir_unlink;
 			}
 		}
 	}
-	
+	kfree(buffer);
 	return 0;
 
 store_thread_info_mkrmdir_unlink:
 	AUDIT
 	pr_info("%s[%s]: calling work queue", MODNAME, __func__);
 	defer_top_half(defer_bottom_half);
+	kfree(buffer);
 	return 0;
 }
