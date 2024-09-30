@@ -1,9 +1,8 @@
 #pragma once
+#include <linux/dcache.h>
 #include <linux/fs.h>
 #include <linux/namei.h>
-#include <linux/dcache.h>
 #include <linux/path.h>
-
 
 int fill_absolute_path(char *pathname);
 int fill_with_swap_filter(char *pathname);
