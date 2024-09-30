@@ -27,7 +27,7 @@ cd "$global_pwd/singlefile-FS" || exit 1
 echo "Entering singlefile-FS folder"
 
 rm -rf image
-run_with_sudo umount ./mount
+run_with_sudo umount -l ./mount
 rm -rf mount
 echo "cleaning the module objects"
 make clean

@@ -176,14 +176,14 @@ int do_change_path(char *the_pwd, char *the_path, int op)
         old_state = current_state;
         read_unlock(&(state_lock));
 #endif
-        if (!((old_state &  REC_OFF) || (old_state & REC_ON))){
+        if (!((old_state == REC_OFF) || (old_state == REC_ON))){
                 pr_err("%s[%s]: reference monitor is not in reconfiguration mode\n", MODNAME, __func__);
                 return  -ECANCELED;
         }
         
         ret = fill_absolute_path(the_path);
         if (ret){
-                pr_warn("%s[%s]: cannot get absolute path\n", MODNAME, __func__);
+                pr_warn("%s[%s]: cannot get absolute path for pathname=%s err=%d\n", MODNAME, __func__, the_path, ret);
                 return ret;
         }
         

@@ -113,7 +113,7 @@ int add_path(char *the_path, struct path path) // here is passed absolute path
         if (!path.dentry->d_inode){
                 kfree(entry->path);
                 kfree(entry);
-                return -EEXIST;
+                return -ENOENT;
         }
 
         inode_lock_shared(path.dentry->d_inode);
@@ -138,7 +138,7 @@ int del_path(char *the_path)
         long len;
         int err;
         struct path path;
-        int ret=0;
+	int ret = -ENOENT;
         if (!the_path){
                 return -EINVAL;
         }
@@ -159,11 +159,11 @@ int del_path(char *the_path)
                                 goto delete_not_exists_kernel_path;
                         }
                         if (!path.dentry->d_inode){
+				ret = -ENOENT;
                                 path_put(&path);
                                 goto delete_not_exists_kernel_path;
-                                return -ENOENT;
                         }       
-                        
+                        ret = 0;
                         path.dentry->d_inode->i_mode = entry->o_mode;
                         path.dentry->d_inode->i_flags = entry->o_flags;
                         path.dentry->d_inode-> i_ctime = current_time(path.dentry->d_inode);
@@ -173,16 +173,16 @@ int del_path(char *the_path)
                         path_put(&path);
 delete_not_exists_kernel_path:                        
                         list_del_rcu(&entry->node);
-                        spin_unlock(&restrict_path_lock);
                         synchronize_rcu();
                         kfree(entry->path);
                         kfree(entry);
-                        return ret;
+			goto exit_del_list_rcu;
                 }
         }
-        spin_unlock(&restrict_path_lock);
+exit_del_list_rcu:
+	spin_unlock(&restrict_path_lock);
 
-   return -ENOENT;   
+	return ret;   
 }
 int forbitten_path(const char *the_path){
         if (!the_path) {
@@ -219,18 +219,18 @@ int check_black_list(const char *path)
         rcu_read_lock();
         list_for_each_entry_rcu(entry, &restrict_path_list, node) {
 		if(!strcmp(path, entry->path)) {
-			rcu_read_unlock();
                         if (!err){
                                 path_put(&target_path);
                         }
+			rcu_read_unlock();
 			return 0;
 		}
-                // whatever if the path exists in black list check for hardlinks
+                // if the path exists in black list check for hardlinks
                 if (!err){
                         if (target_path.dentry){
                                 if (entry->i_ino == target_path.dentry->d_inode->i_ino){
-                                        rcu_read_unlock();
                                         path_put(&target_path);
+                                        rcu_read_unlock();
                                         return 0;
                                 }
                         }

@@ -26,90 +26,87 @@
 void defer_bottom_half(struct work_struct *work)
 {
 
-    struct work_data *data = container_of(work, struct work_data, work);
-    struct file *file;
-    struct file *append_file;
-    mm_segment_t old_fs;
-    loff_t pos = 0;
-    int ret;
-    char *file_contents = NULL;
-    char *buffer;
-    char *ciphertext = NULL;
-    pr_info("%s: work started\n", DEFER_WORK_QUEUE);
-    
-    ciphertext = kmalloc(SHA512_LENGTH * 2 + 1, GFP_KERNEL);
-    if (!ciphertext) {
-        pr_err("%s[%s]: Failed to allocate memory for ciphertext\n", MODNAME, __func__);
-        goto bottom_half_out;
-    }
+	struct work_data *data = container_of(work, struct work_data, work);
+	struct file *file;
+	struct file *append_file;
+	mm_segment_t old_fs;
+	loff_t pos = 0;
+	int ret;
+	char *file_contents = NULL;
+	char *buffer;
+	char *ciphertext = NULL;
+	pr_info("%s: work started\n", DEFER_WORK_QUEUE);
 
-    // Open the executable file
-    old_fs = get_fs();
-    set_fs(KERNEL_DS);
-    file = filp_open(data->path_name, O_RDONLY, 0);
-    set_fs(old_fs);
+	ciphertext = kmalloc(SHA512_LENGTH * 2 + 1, GFP_KERNEL);
+	if (!ciphertext) {
+		pr_err("%s[%s]: Failed to allocate memory for ciphertext\n", MODNAME, __func__);
+		goto bottom_half_out;
+	}
 
-    if (IS_ERR(file)) {
-        pr_err("%s[%s]: defer_bottom: Failed to open file: %s\n", MODNAME, __func__, data->path_name);
-        goto err_ct_allocated;
-    }
+	old_fs = get_fs();
+	set_fs(KERNEL_DS);
+	file = filp_open(data->path_name, O_RDONLY, 0);
+	set_fs(old_fs);
 
-    // Allocate memory for file contents
-    file_contents = kmalloc(file->f_inode->i_size + 1, GFP_KERNEL);
-    if (!file_contents) {
-        pr_err("%s[%s]: Failed to allocate memory for file contents\n", MODNAME, __func__);
-        goto err_filp_opened;
-    }
+	if (IS_ERR(file)) {
+		pr_err("%s[%s]: defer_bottom: Failed to open file: %s\n", MODNAME, __func__, data->path_name);
+		goto err_ct_allocated;
+	}
 
-    ret = kernel_read(file, file_contents, file->f_inode->i_size, &pos);
-    if (ret < 0) {
-        pr_err("%s[%s]: Failed to read file: %s\n", MODNAME, __func__, data->path_name);
-        goto err_file_contents_allocated;
-    }
+	// Allocate memory for file contents
+	file_contents = kmalloc(file->f_inode->i_size + 1, GFP_KERNEL);
+	if (!file_contents) {
+		pr_err("%s[%s]: Failed to allocate memory for file contents\n", MODNAME, __func__);
+		goto err_filp_opened;
+	}
 
-    file_contents[file->f_inode->i_size] = '\0';    
+	ret = kernel_read(file, file_contents, file->f_inode->i_size, &pos);
+	if (ret < 0) {
+		pr_err("%s[%s]: Failed to read file: %s\n", MODNAME, __func__, data->path_name);
+		goto err_file_contents_allocated;
+	}
 
-    ret = hash_plaintext(salt, ciphertext, file_contents);
-    if (ret < 0) {
-        pr_err("%s[%s]: Failed to hash file contents\n", MODNAME, __func__);
-        goto bottom_half_out;
-    }
+	file_contents[file->f_inode->i_size] = '\0';    
 
-    buffer = vmalloc(PAGE_SIZE << 1);
-    if (!buffer){
-        goto err_file_contents_allocated;
-    }
-    
-    sprintf(buffer, "%d,%d,%d,%d,%s,%s\n",
-            data->tgid, data->tid, data->uid, data->euid, data->path_name, ciphertext);
+	ret = hash_plaintext(salt, ciphertext, file_contents);
+	if (ret < 0) {
+		pr_err("%s[%s]: Failed to hash file contents\n", MODNAME, __func__);
+		goto bottom_half_out;
+	}
 
-    append_file = filp_open(single_file_name, O_WRONLY, 0);
-    if (IS_ERR(append_file)){
-        pr_err("%s[%s]: cannot open single file=%s\n", MODNAME, __func__, single_file_name);
-        goto err_buffer_allocated_for_write;
-    }
-        ret = kernel_write(append_file, buffer, strlen(buffer), &pos);
-        if (ret < 0){
-            pr_err("%s[%s]: ret=%d - some issue in writing to the file=%s this content=%s\n", MODNAME, __func__, ret, single_file_name, buffer);
-            goto err_buffer_allocated_for_write;
-        }
-        AUDIT
-    	pr_info("%s[%s]: File written\n", MODNAME, __func__);
+	buffer = vmalloc(PAGE_SIZE << 1);
+	if (!buffer){
+		goto err_file_contents_allocated;
+	}
 
+	sprintf(buffer, "%d,%d,%d,%d,%s,%s\n",
+	    data->tgid, data->tid, data->uid, data->euid, data->path_name, ciphertext);
+
+	append_file = filp_open(single_file_name, O_WRONLY, 0);
+	if (IS_ERR(append_file)){
+		pr_err("%s[%s]: cannot open single file=%s\n", MODNAME, __func__, single_file_name);
+		goto err_buffer_allocated_for_write;
+	}
+	ret = kernel_write(append_file, buffer, strlen(buffer), &pos);
+	if (ret < 0){
+	    pr_err("%s[%s]: ret=%d - some issue in writing to the file=%s this content=%s\n", MODNAME, __func__, ret, single_file_name, buffer);
+	    goto err_append_file_opened_for_write;
+	}
+	AUDIT
+	pr_info("%s[%s]: File written\n", MODNAME, __func__);
+err_append_file_opened_for_write:
+	filp_close(append_file, NULL);
 err_buffer_allocated_for_write:
-    vfree(buffer);
+	vfree(buffer);
 err_file_contents_allocated:
-    kfree(file_contents);
+	kfree(file_contents);
 err_filp_opened:
-    filp_close(file, NULL);
+	filp_close(file, NULL);
 err_ct_allocated:
-    kfree(ciphertext);
+	kfree(ciphertext);
 bottom_half_out:
-    kfree(data->path_name);
-    kfree(data);
-    
-    
-
+	kfree(data->path_name);
+	kfree(data);
 }
 
 void defer_top_half(void (*work_func)(struct work_struct *))
