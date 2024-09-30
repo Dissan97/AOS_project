@@ -74,7 +74,7 @@ void defer_bottom_half(struct work_struct *work)
         if (ret < 0) {
                 pr_err("%s[%s]: Failed to hash file contents\n", MODNAME,
                        __func__);
-                goto bottom_half_out;
+                goto err_file_contents_allocated;
         }
 
         buffer = vmalloc(PAGE_SIZE << 1);
