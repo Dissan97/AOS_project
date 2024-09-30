@@ -102,7 +102,7 @@ module_param(audit_counter, ulong, 0444);
 unsigned long path_syscall_device_major = -1;
 module_param(path_syscall_device_major, ulong, 0444);
 
-char single_file_name[PAGE_SIZE >> 2] = {0};
+char single_file_name[PATH_MAX] = {0};
 module_param_string(single_file_name, single_file_name,
                     sizeof(single_file_name), 0444);
 
