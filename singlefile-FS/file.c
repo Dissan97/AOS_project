@@ -27,27 +27,6 @@ static int onefilefs_open(struct inode *inode, struct file *filp)
         return 0;
 }
 
-static int onefilefs_release(struct inode *inode, struct file *filp)
-{
-        // Add any cleanup code if necessary
-        printk("%s: release called for inode %lu\n", MOD_NAME, inode->i_ino);
-
-        // Perform any necessary cleanup
-        // Example: If you have allocated memory or resources that need to be
-        // freed, do it here For instance, if you have a structure associated
-        // with this file that was allocated, you would free it here.
-
-        // Assuming you had a struct associated with this file:
-        // struct onefilefs_file_info *info = filp->private_data;
-        // if (info) {
-        //     kfree(info);
-        // }
-
-        // If there's any additional cleanup to do, handle it here
-
-        return 0;
-}
-
 ssize_t onefilefs_read(struct file *filp, char __user *buf, size_t len,
                        loff_t *off)
 {
@@ -66,7 +45,7 @@ ssize_t onefilefs_read(struct file *filp, char __user *buf, size_t len,
 
         if (*off >= file_size) {
                 up_read(&lock_log);
-                return 0;
+                ret=0;
         } else if (*off + len > file_size) {
                 len = file_size - *off;
         }
@@ -90,6 +69,8 @@ ssize_t onefilefs_read(struct file *filp, char __user *buf, size_t len,
 
         ret = copy_to_user(buf, bh->b_data + offset, len);
         *off += (len - ret);
+
+release_read:
         brelse(bh);
         up_read(&lock_log);
 
@@ -99,62 +80,64 @@ ssize_t onefilefs_read(struct file *filp, char __user *buf, size_t len,
 ssize_t onefilefs_write(struct file *filp, const char __user *buf, size_t len,
                         loff_t *off)
 {
-        struct inode *inode = filp->f_inode;
-        struct super_block *sb = inode->i_sb;
-        struct buffer_head *bh;
-        loff_t pos = inode->i_size;
-        size_t to_write = len;
-        size_t written = 0;
-        int block_number;
-        int offset;
-        int ret;
-        size_t write_len;
-        ssize_t res = 0;
+	struct inode *inode = filp->f_inode;
+	struct super_block *sb = inode->i_sb;
+	struct buffer_head *bh;
+	loff_t pos = inode->i_size;
+	size_t to_write = len;
+	size_t written = 0;
+	int block_number;
+	int offset;
+	int ret;
+	size_t write_len;
+	ssize_t res = 0;
 
-        down_write(&lock_log);
-        pr_info("%s: write called\n", MOD_NAME);
+	down_write(&lock_log);  // Lock for the entire write operation
+	pr_info("%s: write called\n", MOD_NAME);
 
-        while (to_write > 0) {
-                block_number = pos / DEFAULT_BLOCK_SIZE + 2;
-                offset = pos % DEFAULT_BLOCK_SIZE;
+	// Lock the inode for writing
+	inode_lock(inode);
 
-                bh = sb_bread(sb, block_number);
-                if (!bh) {
-                        res = -EIO;
-                        goto out;
-                }
+	while (to_write > 0) {
+	block_number = pos / DEFAULT_BLOCK_SIZE + 2;
+	offset = pos % DEFAULT_BLOCK_SIZE;
 
-                write_len =
-                    min(to_write, (size_t)(DEFAULT_BLOCK_SIZE - offset));
-                ret = copy_from_user(bh->b_data + offset, buf + written,
-                                     write_len);
-                if (ret != 0) {
-                        brelse(bh);
-                        res = -EFAULT;
-                        goto out;
-                }
+	bh = sb_bread(sb, block_number);
+	if (!bh) {
+    		res = -EIO;
+	    	goto out_unlock_inode;
+	}
 
-                mark_buffer_dirty(bh);
-                sync_dirty_buffer(bh);
-                brelse(bh);
-                pos += write_len;
-                to_write -= write_len;
-                written += write_len;
-        }
+	write_len = min(to_write, (size_t)(DEFAULT_BLOCK_SIZE - offset));
+	ret = copy_from_user(bh->b_data + offset, buf + written, write_len);
+		if (ret != 0) {
+			brelse(bh);
+			res = -EFAULT;
+			goto out_unlock_inode;
+		}
 
-        inode->i_size = pos;
-        *off = pos;
+		mark_buffer_dirty(bh);
+		sync_dirty_buffer(bh);
+		brelse(bh);
+		pos += write_len;
+		to_write -= write_len;
+		written += write_len;
+	}
 
-        mark_inode_dirty(inode);
+	inode->i_size = pos;
+	*off = pos;
 
-        sync_blockdev(sb->s_bdev);
+	mark_inode_dirty(inode);
+	sync_blockdev(sb->s_bdev);
 
-        res = written;
+	res = written;
 
-out:
-        up_write(&lock_log);
-        return res;
+	out_unlock_inode:
+	inode_unlock(inode);  
+	up_write(&lock_log);  
+	return res;
 }
+
 
 static loff_t onefilefs_llseek(struct file *filp, loff_t offset, int whence)
 {
@@ -222,7 +205,6 @@ const struct inode_operations onefilefs_inode_ops = {
 const struct file_operations onefilefs_file_operations = {
     .owner = THIS_MODULE,
     .open = onefilefs_open,
-    .release = onefilefs_release,
     .read = onefilefs_read,
     .write = onefilefs_write,
     .llseek = onefilefs_llseek,

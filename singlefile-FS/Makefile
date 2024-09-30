@@ -9,7 +9,7 @@ load:
 	sudo insmod singlefilefs.ko
 
 create:
-	dd bs=4096 count=262144  if=/dev/zero of=image
+	dd bs=4096 count=100  if=/dev/zero of=image
 	./singlefilemakefs.out image
 	mkdir mount
 	

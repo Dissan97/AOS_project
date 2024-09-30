@@ -18,7 +18,7 @@
 #define __rec_on "RON"
 #define __rec_off "ROF"
 #define __add_path "ADPTH"
-#define __remove_path "RMPHT"
+#define __remove_path "RMPTH"
 
 ssize_t syscall_proc_write(struct file *, const char *, size_t, loff_t *);
 ssize_t syscall_proc_read(struct file *, char *, size_t, loff_t *);

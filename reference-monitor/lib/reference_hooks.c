@@ -61,7 +61,7 @@ char *get_full_user_path(int dfd, const __user char *user_path)
 
         full_path = d_path(&path_struct, dummy_path, PATH_MAX);
         path_put(&path_struct);
-        // kfree(dummy_path);
+        
         return full_path;
 }
 
@@ -75,8 +75,23 @@ struct open_flags {
 
 int pre_do_filp_open_handler(struct kprobe *ri, struct pt_regs *regs)
 {
-        struct filename *pathname = (struct filename *)regs->si;
-        struct open_flags *op_flag = (struct open_flags *)(regs->dx); // arg2
+#if defined(__x86_64__)
+    struct filename *pathname = (struct filename *)regs->si; 
+    struct open_flags *op_flag = (struct open_flags *)(regs->dx); 
+#elif defined(__aarch64__)
+    struct filename *pathname = (struct filename *)regs->regs[0];
+    struct open_flags *op_flag = (struct open_flags *)(regs->regs[1]);
+
+#elif defined(__i386__)
+    struct filename *pathname = (struct filename *)regs->bx;
+    struct open_flags *op_flag = (struct open_flags *)(regs->ecx);
+
+#elif defined(__arm__)
+    struct filename *pathname = (struct filename *)regs->r0;
+    struct open_flags *op_flag = (struct open_flags *)(regs->r1);
+
+#endif
+
         const char *filename = pathname->name;
         char *buffer;
         int ret;
@@ -87,7 +102,7 @@ int pre_do_filp_open_handler(struct kprobe *ri, struct pt_regs *regs)
                 return 0;
         }
 
-        // for routine execution avoid to much overhead
+        
         if (forbitten_path(filename)) {
                 return 0;
         }
@@ -150,7 +165,7 @@ do_filp_open_defer_work:
         AUDIT
         pr_info("%s[%s]: calling work queue", MODNAME, __func__);
         defer_top_half(defer_bottom_half);
-        // setting up bad file descriptor to make fail do_filp_open
+        
 do_filp_open_pre_handler_mem_problem:
 #if defined(__x86_64__)
         regs->di = -1;
@@ -163,32 +178,26 @@ do_filp_open_pre_handler_mem_problem:
         ((struct open_flags *)(regs->cx))->open_flag = 0xFFFFFFFF;
 #elif defined(__arm__)
         regs->ARM_r0 = -1;
-        ((struct open_flags *)(regs->ARM_r1))->open_flag = 0xFFFFFFFF;
+        ((struct open_flags *)(regs->r1))->open_flag = 0xFFFFFFFF;
 #endif
         return 0;
 }
 
-// todo check unlink
 
-int pre_vfs_mk_rmdir_and_unlink_handler(struct kprobe *ri, struct pt_regs *regs)
+
+int pre_vfs_mk_rmdir_handler(struct kprobe *ri, struct pt_regs *regs)
 {
 #if defined(__x86_64__)
-        // struct inode *dir = (struct inode *)regs->di;
+        
         struct dentry *dentry = (struct dentry *)regs->si;
 #elif defined(__aarch64__)
-        struct dentry *dentry =
-            (struct dentry *)
-                regs->regs[1]; // AArch64: Second argument is in `x1` (regs[1])
+        struct dentry *dentry = (struct dentry *)regs->regs[1]; 
 
 #elif defined(__i386__)
-        struct dentry *dentry =
-            (struct dentry *)
-                regs->cx; // x86 (32-bit): Second argument is in `cx`
+        struct dentry *dentry =(struct dentry *)regs->cx; 
 
 #elif defined(__arm__)
-        struct dentry *dentry =
-            (struct dentry *)regs
-                ->ARM_r1; // ARM (32-bit): Second argument is in `r1` (ARM_r1)
+        struct dentry *dentry =(struct dentry *)regs->r1; 
 #endif
         char *buffer;
         int ret;
@@ -198,13 +207,67 @@ int pre_vfs_mk_rmdir_and_unlink_handler(struct kprobe *ri, struct pt_regs *regs)
                 pr_err("%s[%s]: kernel out of memory\n", MODNAME, __func__);
                 return -ENOMEM;
         }
-        // check the dentry if
+        
         if (likely(dentry)) {
                 if (dentry->d_parent) {
                         ret = fill_path_by_dentry(dentry->d_parent, buffer);
                         if (!check_black_list(buffer)) {
                                 pr_err(
                                     "%s[%s]: cannot modify this directory=%s\n",
+                                    MODNAME, __func__, buffer);
+                                mark_inode_read_only(dentry->d_parent->d_inode);
+                                goto store_thread_info_mkrmdir_unlink;
+                        }
+                }
+        }
+        kfree(buffer);
+        return 0;
+
+store_thread_info_mkrmdir_unlink:
+        AUDIT
+        pr_info("%s[%s]: calling work queue", MODNAME, __func__);
+        defer_top_half(defer_bottom_half);
+        kfree(buffer);
+        return 0;
+}
+
+int pre_vfs_unlink_handler(struct kprobe *ri, struct pt_regs *regs)
+{
+#if defined(__x86_64__)
+        
+        struct dentry *dentry = (struct dentry *)regs->si;
+#elif defined(__aarch64__)
+        struct dentry *dentry =(struct dentry *)regs->regs[1]; 
+
+#elif defined(__i386__)
+        struct dentry *dentry =(struct dentry *)regs->cx; 
+
+#elif defined(__arm__)
+        struct dentry *dentry =(struct dentry *)regs->r1; 
+#endif
+        char *buffer;
+        int ret;
+
+        buffer = kzalloc(PATH_MAX, GFP_KERNEL);
+        if (!buffer) {
+                pr_err("%s[%s]: kernel out of memory\n", MODNAME, __func__);
+                return -ENOMEM;
+        }
+        
+        if (likely(dentry)) {
+
+                ret = fill_path_by_dentry(dentry, buffer);
+                if (!check_black_list(buffer)) {
+                        pr_err("%s[%s]: cannot remove this file=%s\n",
+                                MODNAME, __func__, buffer);
+                        mark_inode_read_only(dentry->d_inode);
+                        goto store_thread_info_mkrmdir_unlink;
+                }
+                memset(buffer, 0, PATH_MAX);
+                if (dentry->d_parent) {
+                        ret = fill_path_by_dentry(dentry->d_parent, buffer);
+                        if (!check_black_list(buffer)) {
+                                pr_err("%s[%s]: cannot modify this directory=%s\n",
                                     MODNAME, __func__, buffer);
                                 mark_inode_read_only(dentry->d_parent->d_inode);
                                 goto store_thread_info_mkrmdir_unlink;

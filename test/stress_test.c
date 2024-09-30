@@ -1,171 +1,170 @@
-#include "lib/include/mock.h"
-#include "lib/include/mock_list.h"
-#include "lib/include/ref_syscall.h"
-#include <assert.h>
-#include <errno.h>
-#include <fcntl.h>
-#include <pthread.h>
-#include <stdatomic.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
-#define TRY_HARDERS_THREAD (1)
-#define LOOPS (5)
+#include <fcntl.h>
+#include <sys/stat.h>
+#include <sys/types.h>
+#include <pthread.h>
+#include <sys/wait.h>
+#include <errno.h>
 
-struct black_list_info {
-    node_list_t black_list;
-    pthread_rwlock_t rwlock;
-};
-change_path_mock_t cng;
-struct black_list_info black_list;
-password_t password;
-int all_state[] = {ON, OFF, REC_ON, REC_OFF};
-int bad_state[] = {
-    0,  ON | OFF, REC_OFF | REC_ON, ON | OFF | REC_ON | REC_OFF, 0x40,
-    -1, -1000};
-int current_state;
-int before_state;
+#define BUFFER_SIZE 256
+#define PATH_MAX 4096
+#define ARGS "-pwd <password> -threads <num_threads> -filepath <path_to_conf>"
 
-atomic_int try;
-atomic_int fail;
+char password[BUFFER_SIZE];
+char pathname[PATH_MAX];
+int threads;
 
-void *file_openers(void *dummy)
-{
-    int id = *((int *)dummy);
-    int i;
-    free(dummy);
-    int fd;
-    node_t *curr;
-    curr = cng.list.head;
-    int flag;
+typedef struct csv {
+    char command[BUFFER_SIZE];
+    char path[PATH_MAX];
+    int add; // not used for execv
+} csv_t;
 
-    for (i = 1; i < LOOPS; i++) {
-        if (curr == NULL) {
-            curr = cng.list.head;
-        }
-        switch ((i % 7)) {
-        case 1:
-            flag = O_WRONLY;
-            break;
-        case 2:
-            flag = O_APPEND;
-            break;
-        case 3:
-            flag = O_TRUNC;
-            break;
-        case 4:
-            flag = O_RDWR;
-            break;
-        case 5:
-            flag = O_WRONLY | O_TRUNC;
-            break;
-        case 6:
-            flag = O_RDWR | O_APPEND;
-            break;
-        default:
-            flag = O_RDONLY;
-            break;
-        }
+// Function to execute command using execv
+int execute_command(csv_t *cmd) {
+    char *args[] = {cmd->command, cmd->path, NULL};
+    pid_t pid = fork();
 
-        if (!curr->id_dir) {
-            printf("Trying open this file %s\n", curr->path);
-            fflush(stdout);
-            fd = open(curr->path, flag, 0666);
-            if (curr->add && flag != O_RDONLY) {
-                atomic_fetch_add(&try, 1);
-                if (fd < 0) {
-                    atomic_fetch_add(&fail, 1);
-                }
-            }
-        }
-
-        curr = curr->next;
-    }
-}
-
-int main(int argc, char **argv)
-{
-    change_path_mock_t cngpth_mock;
-    node_list_t list;
-    cngpth_mock.list = list;
-    char *conf_file;
-    cngpth_mock.conf_file = conf_file;
-    size_t len;
-    pthread_t tids[(TRY_HARDERS_THREAD)];
-    int k;
-    node_t *curr;
-    if (argc < 5) {
-        printf("Launch program with -pwd ReferenceMonitorPassword "
-               "-conf conf_file\n");
-        exit(EXIT_FAILURE);
-    }
-
-    mock_password(argc, argv, &password);
-    current_state = mock_get_state();
-    before_state = current_state;
-    mock_gen_test_file_env(argc, argv, &cng);
-    black_list.black_list.head = NULL;
-    black_list.black_list.tail = NULL;
-    pthread_rwlock_init(&black_list.rwlock, NULL);
-
-    if (change_state(password.good_password, REC_ON) < 0 &&
-        errno != ECANCELED) {
-        perror("cannot change the state to REC_ON");
-        exit(EXIT_FAILURE);
-    }
-
-    curr = cng.list.head;
-    while (curr) {
-        if (curr->add) {
-            if (change_path(password.good_password, curr->path, ADD_PATH)) {
-                printf("%s", curr->path);
-                fflush(stdout);
-                perror("cannot add the path");
-            }
-        }
-        curr = curr->next;
-    }
-
-    atomic_init(&try, 0);
-    atomic_init(&fail, 0);
-
-    printf("main thread launching threads\n");
-    for (k = 0; k < TRY_HARDERS_THREAD; k++) {
-        int *id = malloc(sizeof(int));
-        *id = k;
-
-        if (pthread_create(&tids[k], NULL, file_openers, (void *)id) < 0) {
-            perror("unable to create thread for update_thread");
+    if (pid == 0) { // Child process
+        if (execv(cmd->command, args) == -1) {
+            perror("execv failed");
             exit(EXIT_FAILURE);
         }
+    } else if (pid < 0) {
+        perror("fork failed");
+        return -1;
+    } else { // Parent process
+        int status;
+        waitpid(pid, &status, 0);
+        if (WIFEXITED(status) && WEXITSTATUS(status) == 0) {
+            printf("Command '%s %s' executed successfully\n", cmd->command, cmd->path);
+            return 0;
+        } else {
+            printf("Command '%s %s' failed\n", cmd->command, cmd->path);
+            return -1;
+        }
     }
+    return 0;
+}
 
-    for (k = 0; k < (TRY_HARDERS_THREAD + 1); k++) {
-        pthread_join(tids[k], NULL);
-    }
+// Function to undo all executed commands
+void undo_commands(csv_t *commands) {
+    pid_t pid = fork();
+            
+        if (pid == 0) { // Child process
+            // Construct arguments for execv
+            char *args[] = {"/bin/rm", "-rf", commands[0].path, NULL};
 
-    curr = cng.list.head;
-    while (curr) {
-        if (curr->add) {
-            if (change_path(password.good_password, curr->path, REMOVE_PATH)) {
-                printf("%s", curr->path);
-                fflush(stdout);
-                perror("cannot remove the path");
+            // Execute rm -rf <path>
+            if (execv("/bin/rm", args) == -1) {
+                perror("execv failed for rm -rf");
+                exit(EXIT_FAILURE);
+            }
+        } else if (pid < 0) {
+            perror("fork failed for undo command");
+        } else { // Parent process
+            int status;
+            waitpid(pid, &status, 0);
+            if (WIFEXITED(status) && WEXITSTATUS(status) == 0) {
+                printf("Successfully undid command: %s by removing %s\n", commands[0].command, commands[0].path);
+            } else {
+                printf("Failed to undo command: %s\n", commands[0].command);
             }
         }
-        curr = curr->next;
+}
+
+// Function to read CSV file and populate the commands array
+csv_t *read_csv(const char *filepath, int *command_count) {
+    FILE *file = fopen(filepath, "r");
+    if (!file) {
+        perror("Failed to open file");
+        return NULL;
     }
 
-    if (change_state(password.good_password, before_state) < 0 &&
-        errno != ECANCELED) {
-        perror("cannot restore the previous state");
+    csv_t *commands = NULL;
+    char line[BUFFER_SIZE];
+    int count = 0;
+
+    while (fgets(line, sizeof(line), file)) {
+        commands = realloc(commands, sizeof(csv_t) * (count + 1));
+        if (!commands) {
+            perror("Memory allocation failed");
+            fclose(file);
+            return NULL;
+        }
+
+        // Parse each line of the CSV file. Assuming the CSV format is "command,path,add"
+        char *command = strtok(line, ",");
+        char *path = strtok(NULL, ",");
+        char *add = strtok(NULL, ",");
+
+        if (command && path && add) {
+            strncpy(commands[count].command, command, BUFFER_SIZE);
+            strncpy(commands[count].path, path, PATH_MAX);
+            commands[count].add = atoi(add); // Convert "add" to an integer
+            count++;
+        }
+    }
+
+    fclose(file);
+    *command_count = count;
+    return commands;
+}
+
+int main(int argc, char **argv) {
+    int i;
+    pthread_t *tids;
+
+    if (argc < 7) {
+        printf("%s cannot be open please pass %s %s\n", argv[0], argv[0], ARGS);
         exit(EXIT_FAILURE);
     }
-    printf("expectiong that %d == %d\n", atomic_load(&try), atomic_load(&fail));
-    fflush(stdout);
-    assert(atomic_load(&try) == atomic_load(&fail));
 
-    printf("stress_test over\n");
-    fflush(stdout);
+    for (i = 1; i < argc; i++) {
+        if (!strcmp("-pwd", argv[i])) {
+            strcpy(password, argv[i + 1]);
+        }
+        if (!strcmp("-threads", argv[i])) {
+            threads = (int)strtol(argv[i + 1], NULL, 10);
+            if (threads == 0) {
+                printf("your arg [%s %s] and threads set up to=%d cannot init the program\n", argv[i], argv[i + 1], threads);
+                exit(EXIT_FAILURE);
+            }
+        }
+        if (!strcmp("-filepath", argv[i])) {
+            strcpy(pathname, argv[i + 1]);
+        }
+    }
+
+    if (strlen(password) == 0 || strlen(pathname) == 0 || threads == 0) {
+        printf("cannot init the program\n");
+        exit(EXIT_FAILURE);
+    }
+
+    printf("password=%s, pathname=%s, threads=%d\n", password, pathname, threads);
+
+    // Dynamically load commands from CSV file
+    int command_count = 0;
+    csv_t *commands = read_csv(pathname, &command_count);
+
+    if (!commands) {
+        printf("Failed to load commands from CSV file\n");
+        exit(EXIT_FAILURE);
+    }
+
+    for (i = 0; i < command_count; ++i) {
+        if (execute_command(&commands[i]) == -1) {
+            printf("Execution failed, undoing previous commands...\n");
+            break;
+        }
+    }
+
+    sleep(5);
+    undo_commands(commands);
+
+    free(commands); // Free the dynamically allocated array
+    return 0;
 }

@@ -314,9 +314,9 @@ static int __init reference_monitor_init(void)
         const char target_functions[HOOKS_SIZE][16] = {
             "do_filp_open", "vfs_mkdir", "vfs_rmdir", "vfs_unlink"};
         const kprobe_pre_handler_t pre_handlers[HOOKS_SIZE] = {
-            pre_do_filp_open_handler, pre_vfs_mk_rmdir_and_unlink_handler,
-            pre_vfs_mk_rmdir_and_unlink_handler,
-            pre_vfs_mk_rmdir_and_unlink_handler};
+            pre_do_filp_open_handler, pre_vfs_mk_rmdir_handler,
+            pre_vfs_mk_rmdir_handler,
+            pre_vfs_unlink_handler};
 
 #if defined(__x86_64__)
         pr_info("Running on x86_64 architecture.\n");

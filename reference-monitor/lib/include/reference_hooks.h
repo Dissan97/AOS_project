@@ -6,6 +6,6 @@ extern unsigned long audit_counter;
 extern struct kprobe probes[HOOKS_SIZE];
 
 int pre_do_filp_open_handler(struct kprobe *, struct pt_regs *);
-int pre_vfs_mk_rmdir_and_unlink_handler(struct kprobe *, struct pt_regs *);
+int pre_vfs_mk_rmdir_handler(struct kprobe *, struct pt_regs *);
+int pre_vfs_unlink_handler(struct kprobe *ri, struct pt_regs *regs);
 // int pre_vfs_rmdir_handler(struct kprobe*, struct pt_regs *);
-// int pre_vfs_unlink_handler(struct kprobe*, struct pt_regs *);
