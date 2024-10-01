@@ -39,9 +39,9 @@ The the computation of the cryptographic hash and the writing of the above tuple
 ```
 
 ## folders
-- reference-monitor: containing reference monitor source code
-- single-fs: containing single-FS containing append only file
-- Systam_call_discover: is the system-call-table discover modified original source code: "https://github.com/FrancescoQuaglia/Linux-sys_call_table-discoverer.git"
-- test: test directory
-- user: user application to manage reference_monitor  
+- [reference-monitor](reference-monitor): containing reference monitor source code
+- [single-fs](singlefile-FS): containing single-FS containing append only file
+- [Systam_call_discover](System_call_discover): is the system-call-table discover modified original source code: "https://github.com/FrancescoQuaglia/Linux-sys_call_table-discoverer.git"
+- [test](test): test directory
+- [user](user): user application to manage reference_monitor  
 
