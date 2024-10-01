@@ -35,7 +35,7 @@ The the computation of the cryptographic hash and the writing of the above tuple
 ```
 ## automatic unistall
 ```
-    source unistall.sh
+    source unistall.sh  <root passoword>
 ```
 
 ## folders
