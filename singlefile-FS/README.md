@@ -40,7 +40,7 @@ remove
 ```
 
 # files
-- [dir.c](dir.c) : directory management of the filesystem
-- [file.c](file.c): file operation implementations
-- [singlefilefs_src.c](singlefilefs_src.c) : module init and remove
-- [singlefilemakefs.c](singlefilemakefs.c) : image creation that fill the metadata for inode and super block
+- [dir](dir.c) : directory management of the filesystem
+- [file](file.c): file operation implementations
+- [singlefilefs_src](singlefilefs_src.c) : module init and remove
+- [singlefilemakefs](singlefilemakefs.c) : image creation that fill the metadata for inode and super block
