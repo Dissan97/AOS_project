@@ -17,7 +17,3 @@ mount:
 
 unmount:
 	rmmod the_reference_monitor
-
-test:
-	gcc ./user/user.c -o ./user/test
-	./user/test

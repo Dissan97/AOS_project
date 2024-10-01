@@ -1,4 +1,5 @@
 #include "include/ref_syscall.h"
+#include <fcntl.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -8,7 +9,6 @@ int syscall_cache[3];
 int empty = 1;
 #define PATH_BUFFER (1 << 8)
 #define ACCESS_POINT "/proc/ref_syscall/access_point"
-
 int get_syscal_number(int sys_number)
 {
     if (sys_number < 0 || sys_number > 2) {
@@ -22,7 +22,7 @@ int get_syscal_number(int sys_number)
         f = fopen("/sys/module/the_usctm/parameters/free_entries", "r");
 
         if (f == NULL) {
-            perror("cannot open");
+            perror("cannot open /sys/module/the_usctm/parameters/free_entries");
             return EXIT_FAILURE;
         }
 
@@ -57,52 +57,101 @@ int change_password(const char *old_pwd, const char *new_pwd)
 {
     return syscall(get_syscal_number(CHANGE_PASSWORD), old_pwd, new_pwd);
 }
+
+const char *on = "ON";
+const char *off = "OFF";
+const char *rec_on = "RON";
+const char *rec_off = "ROF";
+const char *add_path = "ADPTH";
+const char *remove_path = "RMPHT";
+const char *einval = "-1";
+
+const char *get_str_state(int state)
+{
+    switch (state) {
+    case ON:
+        return on;
+    case OFF:
+        return off;
+    case REC_ON:
+        return rec_on;
+    case REC_OFF:
+        return rec_off;
+    default:
+        return einval;
+    }
+}
+
+const char *get_str_path(int add_or_remove)
+{
+    if (add_or_remove == ADD_PATH) {
+        return add_path;
+    }
+    if (add_or_remove == REMOVE_PATH) {
+        return remove_path;
+    }
+    return einval;
+}
+
 int path_change_state(const char *password, int state)
 {
-    FILE *access_point = fopen(ACCESS_POINT, "w");
+    int fd;
     char buffer[PATH_BUFFER];
-    if (!access_point) {
+    int ret = 0;
+
+    fd = open(ACCESS_POINT, O_WRONLY, 0666);
+    if (fd < 0) {
+        perror("file not exists");
         return -1;
     }
 
-    sprintf(buffer, "cngst -pwd %s -opt %d", password, state);
-    if (fprintf(access, "%s", buffer) < 0) {
-        return -1;
-    }
+    sprintf(buffer, "cngst -pwd %s -opt %s", password, get_str_state(state));
 
-    return 0;
+    if (write(fd, buffer, strlen(buffer)) < 0) {
+        ret = -1;
+    }
+    close(fd);
+    return ret;
 }
 
 int path_change_path(const char *password, const char *the_path,
                      int add_or_remove)
 {
-    FILE *access_point = fopen(ACCESS_POINT, "w");
+    int fd;
     char buffer[PATH_BUFFER];
-    if (!access_point) {
+    int ret = 0;
+
+    fd = open(ACCESS_POINT, O_WRONLY, 0666);
+    if (fd < 0) {
+        perror("file not exists");
         return -1;
     }
+    sprintf(buffer, "cngpth -pwd %s -pth %s -opt %s", password, the_path,
+            get_str_path(add_or_remove));
 
-    sprintf(buffer, "cngst -pwd %s -pth %s -opt %d", password, the_path,
-            add_or_remove);
-    if (fprintf(access, "%s", buffer) < 0) {
-        return -1;
+    if (write(fd, buffer, strlen(buffer)) < 0) {
+        ret = -1;
     }
-
-    return 0;
+    close(fd);
+    return ret;
 }
 
 int path_change_password(const char *old_password, const char *new_password)
 {
-    FILE *access_point = fopen(ACCESS_POINT, "w");
+    int fd;
     char buffer[PATH_BUFFER];
-    if (!access_point) {
+    int ret = 0;
+
+    fd = open(ACCESS_POINT, O_WRONLY, 0666);
+    if (fd < 0) {
+        perror("file not exists");
         return -1;
     }
+    sprintf(buffer, "cngpwd -old %s -new %s", old_password, new_password);
 
-    sprintf(buffer, "cngst -old %s -new %d", old_password, new_password);
-    if (fprintf(access, "%s", buffer) < 0) {
-        return -1;
+    if (write(fd, buffer, strlen(buffer)) < 0) {
+        ret = -1;
     }
-
-    return 0;
+    close(fd);
+    return ret;
 }

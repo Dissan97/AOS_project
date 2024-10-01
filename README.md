@@ -28,3 +28,20 @@ the effective user-id
 the program path-name that is currently attempting the open
 a cryptographic hash of the program file content
 The the computation of the cryptographic hash and the writing of the above tuple should be carried in deferred work.
+
+## automatic install
+```
+    source install.sh <root passoword>
+```
+## automatic unistall
+```
+    source unistall.sh
+```
+
+## folders
+- reference-monitor: containing reference monitor source code
+- single-fs: containing single-FS containing append only file
+- Systam_call_discover: is the system-call-table discover modified original source code: "https://github.com/FrancescoQuaglia/Linux-sys_call_table-discoverer.git"
+- test: test directory
+- user: user application to manage reference_monitor  
+

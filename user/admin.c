@@ -1,110 +1,181 @@
 #include "lib/include/ref_syscall.h"
 
+#include "lib/include/ref_syscall.h"
+
 #include <ctype.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
+#include <sys/types.h>
 
-#define SYS_CS 0x1
-#define SYS_CP 0x2
-#define SYSS (SYS_CS | SYS_CP)
-#define AUDIT if (1)
 
-void setup_state(char *p, int *state)
-{
-    unsigned int i;
-    char dummy[8] = {0};
-    for (i = 0; i < strlen(p); i++) {
-        dummy[i] = toupper(p[i]);
-    }
+#define MAX_PASSWORD (1 << 6)
+#define PATH_MAX (1 << 12)
+#define MAX_COMMAND (1 << 5)
 
-    if (!strcmp(dummy, "ON")) {
-        *state = ON;
-    }
-    if (!strcmp(dummy, "OFF")) {
-        *state = OFF;
-    }
-    if (!strcmp(dummy, "REC_ON")) {
-        *state = REC_ON;
-    }
-    if (!strcmp(dummy, "REC_OFF")) {
-        *state = REC_OFF;
+
+
+void to_lowercase(char *str) {
+    for (int i = 0; str[i]; i++) {
+        str[i] = tolower(str[i]);
     }
 }
 
-void setup_op(char *p, int *op)
-{
-    unsigned int i;
-    char dummy[8] = {0};
-
-    for (i = 0; i < strlen(p); i++) {
-        dummy[i] = toupper(p[i]);
-    }
-    if (!strcmp(dummy, "ADD")) {
-        *op = ADD_PATH;
-    }
-    if (!strcmp(dummy, "REM")) {
-        *op = REMOVE_PATH;
-    }
+void show_help() {
+    printf("Available commands:\n");
+    printf("[0]: change_state\n");
+    printf("[1]: change_path\n");
+    printf("[2]: change_password\n");
+    printf("[3]: help (to show this message)\n");
+    printf("Type 'quit' to exit the program.\n");
 }
 
-int main(int argc, char **argv)
-{
-    char *pwd;
-    int sys = 0x0;
-    int i;
-    char *path = NULL;
-    int state = -1;
-    int op = -1;
-
-    if (argc < 4) {
-        printf("pass at least this arguments (change state) [password -cs "
-               "state] or (change path) [password -cp add|rem path]\n");
-        return -1;
-    }
-    pwd = argv[1];
-    AUDIT
-    {
-        printf("_____________________Program_debug_____________________\n");
-        printf("ARGUMENT PASSED = %d\n", argc - 1);
-        for (int i = 0; i < argc; i++) {
-            printf("%s ", argv[i]);
-            fflush(stdout);
+void read_line(char *buffer, size_t size) {
+    if (fgets(buffer, size, stdin)) {
+        size_t len = strlen(buffer);
+        if (len > 0 && buffer[len - 1] == '\n') {
+            buffer[len - 1] = '\0';
         }
-        printf("\n_______________________________________________________\n");
+    }
+}
+
+void handle_change_state() {
+    char password[MAX_PASSWORD];
+    char input[MAX_COMMAND];
+    int state = -1;
+
+    printf("Enter the password: ");
+    read_line(password, MAX_PASSWORD);
+
+    printf("Select the state:\n");
+    printf("[0]: ON\n");
+    printf("[1]: OFF\n");
+    printf("[2]: REC_ON\n");
+    printf("[3]: REC_OFF\n");
+
+    read_line(input, MAX_COMMAND);
+    to_lowercase(input);
+
+    if (strcmp(input, "0") == 0 || strcmp(input, "on") == 0) {
+        state = ON;
+    } else if (strcmp(input, "1") == 0 || strcmp(input, "off") == 0) {
+        state = OFF;
+    } else if (strcmp(input, "2") == 0 || strcmp(input, "rec_on") == 0) {
+        state = REC_ON;
+    } else if (strcmp(input, "3") == 0 || strcmp(input, "rec_off") == 0) {
+        state = REC_OFF;
+    } else {
+        printf("Invalid input for change_state.\n");
+        return;
+    }
+
+    if (change_state(password, state) < 0) {
+        printf("change_state(%s, %d): ", password, state);
+        fflush(stdout);
+        perror("failed");
+    }else {
+        printf("state=%s changed successfully\n", (state == ON ? "on" : state == OFF ?
+          "off" : state == REC_ON ? "rec_on" : "rec_off"));
         fflush(stdout);
     }
+}
 
-    for (i = 2; i < argc; i++) {
-        if (!strcmp(argv[i], "-cs")) {
-            sys |= SYS_CS;
-            setup_state(argv[i + 1], &state);
-        }
-        if (!strcmp(argv[i], "-cp")) {
-            sys |= SYS_CP;
-            setup_op(argv[i + 1], &op);
-            path = argv[i + 2];
-        }
+void handle_change_path() {
+    char password[MAX_PASSWORD];
+    char path[PATH_MAX];
+    char input[MAX_COMMAND];
+    int op = -1;
+
+    printf("Enter the password: ");
+    read_line(password, MAX_PASSWORD);
+
+    printf("Select operation:\n");
+    printf("[0]: addpath\n");
+    printf("[1]: rmpath\n");
+
+    read_line(input, MAX_COMMAND);
+    to_lowercase(input);
+
+    if (strcmp(input, "0") == 0 || strcmp(input, "addpath") == 0) {
+        op = ADD_PATH;
+    } else if (strcmp(input, "1") == 0 || strcmp(input, "rmpath") == 0) {
+        op = REMOVE_PATH;
+    } else {
+        printf("Invalid input for change_path.\n");
+        return;
     }
 
-    if (!sys) {
-        printf("argument 1 -cs or -cp\n");
-        return -1;
+    printf("Enter the path: ");
+    read_line(path, PATH_MAX);
+
+    if (change_path(password, path, op) < 0) {
+        printf("change_path(%s, %s, %d): ", password, path, op);
+        fflush(stdout);
+        perror("failed");
+    }else {
+        printf("path=%s added successfully\n", path);
+        fflush(stdout);
+    }
+}
+
+void handle_change_password() {
+    char old_password[MAX_PASSWORD], new_password[MAX_PASSWORD];
+    char input[MAX_COMMAND];
+
+    printf("Enter the old password: ");
+    read_line(old_password, MAX_PASSWORD);
+
+    printf("Enter the new password: ");
+    read_line(new_password, MAX_PASSWORD);
+
+    printf("Confirm password change (y/n): ");
+    read_line(input, MAX_COMMAND);
+    if (tolower(input[0]) == 'y') {
+        if (change_password(old_password, new_password) < 0) {
+            printf("change_password failed\n");
+            perror("error");
+        }else {
+            printf("password changed correctly\n");
+        }
+    } else {
+        printf("Password change canceled.\n");
+    }
+}
+
+int main() {
+    char input[MAX_COMMAND];
+
+    if (geteuid() != 0){
+        printf("to run this application you need root priviledge\n");
+        fflush(stdout);
+        exit(EXIT_SUCCESS);
     }
 
-    if ((sys & SYS_CS) && state != -1) {
-        if (!change_state(pwd, state)) {
-            printf("change state done successfully type dmesg\n");
+    show_help();
+
+    while (1) {
+        printf("\nEnter a command >> ");
+        read_line(input, MAX_COMMAND);
+
+        to_lowercase(input); 
+
+        if (strcmp(input, "quit") == 0) {
+            printf("Exiting the program.\n");
+            break;
+        } else if (strcmp(input, "0") == 0 || strcmp(input, "change_state") == 0) {
+            handle_change_state();
+        } else if (strcmp(input, "1") == 0 || strcmp(input, "change_path") == 0) {
+            handle_change_path();
+        } else if (strcmp(input, "2") == 0 || strcmp(input, "change_password") == 0) {
+            handle_change_password();
+        } else if (strcmp(input, "3") == 0 || strcmp(input, "help") == 0) {
+            show_help();
         } else {
-            perror("change state problem");
+            printf("Invalid command. Showing help:\n");
+            show_help();
         }
     }
 
-    if ((sys & SYS_CP) && op != -1 && path) {
-        if (!change_path(pwd, path, op)) {
-            printf("change path done successfully type dmesg\n");
-        } else {
-            perror("change path problem");
-        }
-    }
+    return 0;
 }

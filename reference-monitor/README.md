@@ -1,30 +1,32 @@
-# aos_project
+# Reference Monitor
 Reference monitor to secure writing on protected files or directories
 
 
 
 ## @Autor: Dissan Uddin Ahmed
 ## @Accademic_year: 2023/2024
-### Docs
-https://elixir.bootlin.com/linux/v5.4.105/source
-## @project_info:
-Kernel Level Reference Monitor for File Protection
-This specification is related to a Linux Kernel Module (LKM) implementing a reference monitor for file protection. The reference monitor can be in one of the following four states:
-OFF, meaning that its operations are currently disabled;
-ON, meaning that its operations are currently enabled;
-REC-ON/REC-OFF, meaning that it can be currently reconfigured (in either ON or OFF mode).
-The configuration of the reference monitor is based on a set of file system paths. Each path corresponds to a file/dir that cannot be currently opened in write mode. Hence, any attempt to write-open the path needs to return an error, independently of the user-id that attempts the open operation.
 
-Reconfiguring the reference monitor means that some path to be protected can be added/removed. In any case, changing the current state of the reference monitor requires that the thread that is running this operation needs to be marked with effective-user-id set to root, and additionally the reconfiguration requires in input a password that is reference-monitor specific. This means that the encrypted version of the password is maintained at the level of the reference monitor architecture for performing the required checks.
+## compilation
+```
+    make
+```
+## insmod
+run with root permission
+```
+    make mount
+```
+insmod the_reference_monitor.ko the_syscall_table=\$(hacked_sys_table_addr) pwd='RefMonitorPwd' single_file_name=\$(realpath ../singlefile-FS/mount/the-file)
+- the_syscall_table: address of the system call table hack module
+- pwd: the password to pass for reference monitor
+- single_file_name: the path of the singlefile-FS single file
 
-It is up to the software designer to determine if the above states ON/OFF/REC-ON/REC-OFF can be changed via VFS API or via specific system-calls. The same is true for the services that implement each reconfiguration step (addition/deletion of paths to be checked). Together with kernel level stuff, the project should also deliver user space code/commands for invoking the system level API with correct parameters.
+## files
+- [reference_monitor.c](reference_monitor.c): implementation of init and clean function and sys_call_wrapper for hacked system calls and proc definition for path base syscall
+- [reference_defer.c](lib/reference_defer.c) : implementation of defer working after some thread try to access unathorize folder
+- [reference_hash.c](lib/reference_hash.c) : implementation of password hash function
+- [path_based_syscall.c](lib/path_based_syscall.c) : implementation of path based syscall using /proc
+- [path_path_solver.c](lib/path_path_solver.c) :implementation of path_solver_logic for the reference_monitor
+- [reference_rcu_restrict_list.c](lib/reference_rcu_restrict_list.c) : rcu list that handle black listed paths
+- [reference_syscalls.c](lib/reference_syscalls.c) : actual implementation of the system call for reference monitor
+- [scth.c](lib/scth.c) : needed to hack system call table
 
-In addition to the above specifics, the project should also include the realization of a file system where a single append-only file should record the following tuple of data (per line of the file) each time an attempt to write-open a protected file system path is attempted:
-
-the process TGID
-the thread ID
-the user-id
-the effective user-id
-the program path-name that is currently attempting the open
-a cryptographic hash of the program file content
-The the computation of the cryptographic hash and the writing of the above tuple should be carried in deferred work.

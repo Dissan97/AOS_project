@@ -15,6 +15,7 @@
         - BLOCK 1, inode of the unique file (the inode for root is volatile);
         - BLOCK 2, ..., datablocks of the unique file
 */
+unsigned long max_file_size; // needed for singlefs_module
 
 int main(int argc, char *argv[])
 {
@@ -26,8 +27,7 @@ int main(int argc, char *argv[])
         struct onefilefs_dir_record record;
         char *block_padding;
         char *file_body =
-            "TGID,PID,UID,EUID,PATH,HASH\n"; // this is the default content of
-                                             // the unique file
+            "TGID,PID,UID,EUID,PATH,HASH\n"; // default content of the unique file
 
         if (argc != 2) {
                 printf("Usage: mkfs-singlefilefs <device>\n");
@@ -40,54 +40,55 @@ int main(int argc, char *argv[])
                 return -1;
         }
 
-        // pack the superblock
-        sb.version = 1; // file system version
+        // Pack the superblock
+        sb.version = 1; // File system version
         sb.magic = MAGIC;
         sb.block_size = DEFAULT_BLOCK_SIZE;
 
         ret = write(fd, (char *)&sb, sizeof(sb));
-
         if (ret != DEFAULT_BLOCK_SIZE) {
-                printf("Bytes written [%d] are not equal to the default block "
-                       "size.\n",
-                       (int)ret);
+                printf("Bytes written [%d] are not equal to the default block size.\n", (int)ret);
                 close(fd);
                 return ret;
         }
+        printf("Super block written successfully\n");
 
-        printf("Super block written succesfully\n");
-
-        // write file inode
+        // Write file inode
         file_inode.mode = S_IFREG;
         file_inode.inode_no = SINGLEFILEFS_FILE_INODE_NUMBER;
         file_inode.file_size = strlen(file_body);
         printf("File size is %ld\n", file_inode.file_size);
         fflush(stdout);
-        ret = write(fd, (char *)&file_inode, sizeof(file_inode));
 
-        if (ret != sizeof(root_inode)) {
+        ret = write(fd, (char *)&file_inode, sizeof(file_inode));
+        if (ret != sizeof(file_inode)) { // Corrected check
                 printf("The file inode was not written properly.\n");
                 close(fd);
                 return -1;
         }
+        printf("File inode written successfully.\n");
 
-        printf("File inode written succesfully.\n");
-
-        // padding for block 1
+        // Padding for block 1
         nbytes = DEFAULT_BLOCK_SIZE - sizeof(file_inode);
         block_padding = malloc(nbytes);
-
-        ret = write(fd, block_padding, nbytes);
-
-        if (ret != nbytes) {
-                printf("The padding bytes are not written properly. Retry your "
-                       "mkfs\n");
+        if (!block_padding) { // Check for malloc failure
+                perror("Failed to allocate memory for padding");
                 close(fd);
                 return -1;
         }
-        printf("Padding in the inode block written sucessfully.\n");
+        memset(block_padding, 0, nbytes); // Initialize padding with zeros
 
-        // write file datablock
+        ret = write(fd, block_padding, nbytes);
+        if (ret != nbytes) {
+                printf("The padding bytes are not written properly. Retry your mkfs\n");
+                free(block_padding); // Free allocated memory
+                close(fd);
+                return -1;
+        }
+        printf("Padding in the inode block written successfully.\n");
+        free(block_padding); // Free allocated memory
+
+        // Write file datablock
         nbytes = strlen(file_body);
         ret = write(fd, file_body, nbytes);
         if (ret != nbytes) {
@@ -95,9 +96,9 @@ int main(int argc, char *argv[])
                 close(fd);
                 return -1;
         }
-        printf("File datablock has been written succesfully.\n");
+        printf("File datablock has been written successfully.\n");
 
         close(fd);
-
         return 0;
 }
+

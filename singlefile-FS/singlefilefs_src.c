@@ -16,6 +16,10 @@ static struct super_operations singlefilefs_super_ops = {};
 
 static struct dentry_operations singlefilefs_dentry_ops = {};
 
+unsigned long max_file_size;
+module_param(max_file_size, ulong, 0444); 
+MODULE_PARM_DESC(max_file_size, "Max del file size in byte");
+
 int singlefilefs_fill_super(struct super_block *sb, void *data, int silent)
 {
         struct inode *root_inode;
@@ -103,8 +107,7 @@ struct dentry *singlefilefs_mount(struct file_system_type *fs_type, int flags,
 
         struct dentry *ret;
 
-        ret =
-            mount_bdev(fs_type, flags, dev_name, data, singlefilefs_fill_super);
+        ret = mount_bdev(fs_type, flags, dev_name, data, singlefilefs_fill_super);
 
         if (unlikely(IS_ERR(ret)))
                 printk("%s: error mounting onefilefs", MOD_NAME);
@@ -124,21 +127,27 @@ static struct file_system_type onefilefs_type = {
     .kill_sb = singlefilefs_kill_superblock,
 };
 
+
 static int singlefilefs_init(void)
 {
+    int ret;
 
-        int ret;
+    // check if the max_file_parameter is not passed
+    if (max_file_size <= 0) {
+        pr_err("%s: max_file_size not specified\n", MOD_NAME);
+        return -EINVAL; 
+    }
 
-        // register filesystem
-        ret = register_filesystem(&onefilefs_type);
-        if (likely(ret == 0))
-                printk("%s: sucessfully registered singlefilefs\n", MOD_NAME);
-        else
-                printk("%s: failed to register singlefilefs - error %d",
-                       MOD_NAME, ret);
+    // Register filesystem
+    ret = register_filesystem(&onefilefs_type);
+    if (likely(ret == 0))
+        pr_info("%s: singlefilefs registered succesfully\n", MOD_NAME);
+    else
+        pr_err("%s:  cannot register singlefilefs - error %d\n", MOD_NAME, ret);
 
-        return ret;
+    return ret;
 }
+
 
 static void singlefilefs_exit(void)
 {

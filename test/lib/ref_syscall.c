@@ -22,7 +22,7 @@ int get_syscal_number(int sys_number)
         f = fopen("/sys/module/the_usctm/parameters/free_entries", "r");
 
         if (f == NULL) {
-            perror("cannot open");
+            perror("cannot open /sys/module/the_usctm/parameters/free_entries");
             return EXIT_FAILURE;
         }
 

@@ -30,5 +30,5 @@ extern rwlock_t password_lock;
 extern char pwd[(SHA512_LENGTH * 2) + 1];
 extern unsigned long current_state;
 extern unsigned int admin;
-extern char single_file_name[PAGE_SIZE >> 2];
+extern char single_file_name[PATH_MAX];
 extern char salt[(SALT_LENGTH + 1)];

@@ -14,3 +14,8 @@
 int change_state(const char *password, int state);
 int change_path(const char *password, const char *the_path, int add_or_remove);
 int change_password(const char *old_password, const char *new_password);
+
+int path_change_state(const char *password, int state);
+int path_change_path(const char *password, const char *the_path,
+                     int add_or_remove);
+int path_change_password(const char *old_password, const char *new_password);

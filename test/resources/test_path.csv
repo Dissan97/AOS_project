@@ -1,6 +1,0 @@
-command,path,add
-/bin/mkdir,test-dir/dir-child,0
-/bin/mkdir,test-dir/dir-child,1
-/bin/touch,test-dir/file test-dir/dir-child/file,1
-/bin/link,test-dir/file test-dir/file_hl,0
-/bin/link,test-dir/file test-dir/dir-child/parent_file,0

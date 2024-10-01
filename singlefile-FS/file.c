@@ -27,6 +27,12 @@ static int onefilefs_open(struct inode *inode, struct file *filp)
         return 0;
 }
 
+static int onefilefs_release(struct inode *inode, struct file *filp)
+{
+    pr_info("%s: file closed: %s\n", MOD_NAME, filp->f_path.dentry->d_name.name);
+    return 0;  
+}
+
 ssize_t onefilefs_read(struct file *filp, char __user *buf, size_t len,
                        loff_t *off)
 {
@@ -37,44 +43,50 @@ ssize_t onefilefs_read(struct file *filp, char __user *buf, size_t len,
         int ret;
         int block_to_read;
 
-        printk("%s: read operation called with len %ld - and offset %lld (the "
-               "current file size is %lld)",
-               MOD_NAME, len, *off, file_size);
-
         down_read(&lock_log);
 
-        if (*off >= file_size) {
+        if (file_size == 0) {
                 up_read(&lock_log);
-                ret=0;
-        } else if (*off + len > file_size) {
-                len = file_size - *off;
+                return 0; 
         }
 
+        if (*off >= file_size) {
+                pr_warn("%s: cannot go over file_size\n", MOD_NAME);
+                up_read(&lock_log);
+                return 0; 
+        }
+
+        if (*off + len > file_size) {
+                len = file_size - *off; 
+        }
+      
         offset = *off % DEFAULT_BLOCK_SIZE;
-
+       
         if (offset + len > DEFAULT_BLOCK_SIZE) {
-                len = DEFAULT_BLOCK_SIZE - offset;
+                len = DEFAULT_BLOCK_SIZE - offset; 
         }
-
-        block_to_read = *off / DEFAULT_BLOCK_SIZE + 2;
-
-        printk("%s: read operation must access block %d of the device",
-               MOD_NAME, block_to_read);
-
+        
+        block_to_read = *off / DEFAULT_BLOCK_SIZE + 2; 
+        
         bh = sb_bread(filp->f_path.dentry->d_inode->i_sb, block_to_read);
         if (!bh) {
                 up_read(&lock_log);
-                return -EIO;
+                return -EIO; 
         }
-
+       
         ret = copy_to_user(buf, bh->b_data + offset, len);
-        *off += (len - ret);
+        if (ret != 0) {
+                brelse(bh);
+                up_read(&lock_log);
+                return -EFAULT; 
+        }
+       
+        *off += len; 
 
-release_read:
         brelse(bh);
         up_read(&lock_log);
 
-        return len - ret;
+        return len; 
 }
 
 ssize_t onefilefs_write(struct file *filp, const char __user *buf, size_t len,
@@ -92,10 +104,15 @@ ssize_t onefilefs_write(struct file *filp, const char __user *buf, size_t len,
 	size_t write_len;
 	ssize_t res = 0;
 
-	down_write(&lock_log);  // Lock for the entire write operation
+
+	 if ((pos + len) >= max_file_size) {
+	        pr_warn("%s: max dimention of file reached %ld\n", MOD_NAME,max_file_size);
+        	return -EFBIG;
+    	}
+
+	down_write(&lock_log);  
 	pr_info("%s: write called\n", MOD_NAME);
 
-	// Lock the inode for writing
 	inode_lock(inode);
 
 	while (to_write > 0) {
@@ -132,7 +149,7 @@ ssize_t onefilefs_write(struct file *filp, const char __user *buf, size_t len,
 
 	res = written;
 
-	out_unlock_inode:
+out_unlock_inode:
 	inode_unlock(inode);  
 	up_write(&lock_log);  
 	return res;
@@ -208,4 +225,5 @@ const struct file_operations onefilefs_file_operations = {
     .read = onefilefs_read,
     .write = onefilefs_write,
     .llseek = onefilefs_llseek,
+    .release = onefilefs_release
 };
