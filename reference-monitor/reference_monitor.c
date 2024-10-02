@@ -266,18 +266,11 @@ spinlock_t restrict_path_lock;
 /*
  * *****************************************************
  *             KPROBES' STRUCT
- *             target_functions={vfs_open, (vfs_mkdir, vfs_rmdir, vfs_unlink)}
+ *             target_functions={do_filp_open, (vfs_mkdir, vfs_rmdir, vfs_unlink)}
  * *****************************************************
  */
 
 struct kprobe probes[HOOKS_SIZE];
-
-/*
-struct kprobe vfs_open_kp;
-struct kprobe vfs_mkdir_kp;
-struct kprobe vfs_rmdir_kp;
-struct kprobe vfs_unlink_kp;
-*/
 
 /*
  * *****************************************************
@@ -295,11 +288,9 @@ static struct proc_dir_entry *proc_file;
 #define proc_syscall_access_file "access_point"
 /*
  * *****************************************************
- *             APPEND ONLY DEVICE & DEFER
+ *             DEFER WORK 
  * *****************************************************
  */
-struct file_operations append_fops;
-unsigned long append_defer_device_major = -1;
 struct workqueue_struct *deferred_queue;
 char *file_appendonly;
 
