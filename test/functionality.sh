@@ -1,3 +1,4 @@
+PASSWORD="$1"
 run_with_sudo() {
     echo "$PASSWORD" | sudo -S bash -c "$*"
 }

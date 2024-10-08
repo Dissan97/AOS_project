@@ -526,9 +526,11 @@ static void __exit reference_monitor_cleanup(void)
         AUDIT
         pr_info("%s: sys-call table restored to its original content\n",
                 MODNAME);
+        pr_info("%s: flushing pending works\n", MODNAME);
+        flush_workqueue(deferred_queue); 
         destroy_workqueue(deferred_queue);
         AUDIT
-        pr_info("%s: work queue destryed\n", MODNAME);
+        pr_info("%s: work queue destroyed\n", MODNAME);
 }
 
 module_init(reference_monitor_init);
