@@ -43,7 +43,7 @@ link test-dir/test-file test-dir/test-filehl
 link test-dir/test-file test-dir/test-child/test-filehl
 before_state=$(cat /sys/module/the_reference_monitor/parameters/current_state)
 before_state_arg=$(get_string_state "$before_state")
-
+curren_state=$(cat /sys/module/the_reference_monitor/parameters/current_state)
 echo "configuring reference monitor current_state=$before_state_arg configuring to rec_on"
 run_with_sudo echo "cngst -opt ron -pwd $2" > /proc/ref_syscall/access_point
 curren_state=$(cat /sys/module/the_reference_monitor/parameters/current_state)
@@ -52,7 +52,14 @@ run_with_sudo echo "cngpth -opt ADPTH -pwd $2 -pth test-dir/test-file" > /proc/r
 run_with_sudo echo "cngpth -opt ADPTH -pwd $2 -pth test-dir/test-child" > /proc/ref_syscall/access_point
 echo "gcc stress_test.c -o stress_test.out -lpthread -DLOOPS=$loops"
 gcc stress_test.c -o stress_test.out -lpthread -DLOOPS=$loops
-./stress_test.out -target file -threads $threads -filepaths "test-dir/test-file;test-dir/test-filehl;test-dir/test-child/test-filehl" -num_paths 3
+echo "test open"
+./stress_test.out -target open -threads $threads -filepaths "test-dir/test-file;test-dir/test-filehl;test-dir/test-child/test-filehl" -num_paths 3
+echo "test mkdir"
+./stress_test.out -target mkdir -threads $threads -filepaths "test-dir/test-child" -num_paths 3
+echo "test rmdir"
+./stress_test.out -target rmdir -threads $threads -filepaths "test-dir/test-child/another-dir" -num_paths 3
+echo "test unlink"
+./stress_test.out -target unlink -threads $threads -filepaths "test-dir/test-child/test-filehl" -num_paths 3
 run_with_sudo echo "cngpth -opt RMPTH -pwd $2 -pth test-dir/test-file" > /proc/ref_syscall/access_point
 run_with_sudo echo "cngpth -opt RMPTH -pwd $2 -pth test-dir/test-child" > /proc/ref_syscall/access_point
 run_with_sudo echo "cngst -opt $before_state_arg -pwd $2" > /proc/ref_syscall/access_point

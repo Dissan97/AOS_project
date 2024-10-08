@@ -66,12 +66,13 @@ int do_change_state(char *the_pwd, int the_state)
 
         if (the_pwd == NULL || (the_state != ON && the_state != OFF &&
                                 the_state != REC_ON && the_state != REC_OFF)) {
+                pr_warn("%s[%s]: cannot use this state not allowed %d\n",MODNAME, __func__, the_state);
                 return -EINVAL;
         }
 
         if ((ret = check_pwd(the_pwd))) {
-                pr_info("%s[%s]: check pwd failed from_user %s\n", MODNAME,
-                        __func__, the_pwd);
+                pr_info("%s[%s]: check pwd failed from_user password=********\n", MODNAME,
+                        __func__);
                 return -EACCES;
         };
 #ifdef NO_LOCK
@@ -111,6 +112,8 @@ int do_change_state(char *the_pwd, int the_state)
                 current_state);
         if (current_state == the_state) {
                 write_unlock(&(state_lock));
+                pr_warn("%s[%s]: same state required %d \n", MODNAME, __func__, the_state);
+
                 return -ECANCELED;
         }
 

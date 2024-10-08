@@ -63,7 +63,7 @@ const char *off = "OFF";
 const char *rec_on = "RON";
 const char *rec_off = "ROF";
 const char *add_path = "ADPTH";
-const char *remove_path = "RMPHT";
+const char *remove_path = "RMPTH";
 const char *einval = "-1";
 
 const char *get_str_state(int state)

@@ -27,20 +27,20 @@ void *target_open(void *dummy){
     int ret;
     int i;
     int fd;
-    int fail;
+    int fail = 0;
     free(dummy);
     
     printf("target_open[%d] started\n", id);
     fflush(stdout);
     
     for (i = 0; i < LOOPS; i++){
-        fd = open(pathnames[i % num_paths], O_WRONLY | O_RDWR | O_CREAT);
+        fd = open(pathnames[i % num_paths], O_WRONLY | O_RDWR | O_CREAT | O_TRUNC);
         if (fd < 0){
-            fail ++;
-        }else {
-            close(fd);
+            fail = fail + 1;
         }
+        close(fd);
     }
+    
     printf("target_open[%d] finish %d loop - %d fail\n",id, LOOPS, fail);
     fflush(stdout);
     
@@ -85,7 +85,7 @@ void *target_unlink(void *dummy) {
     for (i = 0; i < LOOPS; i++) {
         ret = unlink(pathnames[i % num_paths]);  // Remove files
         if (ret < 0) {
-            fail++;
+            fail = fail + 1;
         }
     }
     printf("target_unlink[%d] finish %d loops - %d fail\n", id, LOOPS, fail);
@@ -106,7 +106,7 @@ void *target_rmdir(void *dummy) {
     for (i = 0; i < LOOPS; i++) {
         ret = rmdir(pathnames[i % num_paths]);  
         if (ret < 0) {
-            fail++;
+            fail = fail + 1;
         }
     }
     printf("target_rmdir[%d] finish %d loops - %d fail\n", id, LOOPS, fail);
