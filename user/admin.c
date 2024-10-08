@@ -27,7 +27,9 @@ void show_help() {
     printf("[0]: change_state\n");
     printf("[1]: change_path\n");
     printf("[2]: change_password\n");
-    printf("[3]: help (to show this message)\n");
+    printf("[3]: get_state\n");
+    printf("[4]: blacklist\n");
+    printf("[5]: help (to show this message)\n");
     printf("Type 'quit' to exit the program.\n");
 }
 
@@ -142,7 +144,48 @@ void handle_change_password() {
         printf("Password change canceled.\n");
     }
 }
+void print_actual_state(){
+    char buff[16];
+    int read_bytes;
+    FILE *current_state_pseudo_file;
 
+    current_state_pseudo_file = fopen(
+        "/sys/module/the_reference_monitor/parameters/current_state", "r");
+    if (current_state_pseudo_file == NULL) {
+        perror("cannot ope sys");
+        return;
+    }
+
+    read_bytes = fread(buff, sizeof(char), sizeof(buff), current_state_pseudo_file);
+    if (read_bytes < 0) {
+        perror("some problem occured");
+        return;
+    }
+    buff[read_bytes - 1] = 0;
+    fclose(current_state_pseudo_file);
+    int the_state = atoi(buff);
+    printf("actual state=%d:%s\n", the_state, get_str_state(the_state));
+    fflush(stdout);
+}
+
+void print_black_list() {
+    FILE *access_point;
+    char buffer[PATH_MAX];
+    access_point = fopen("/proc/ref_syscall/access_point", "r");
+    if (access_point == NULL){
+        perror("reference_monitor not loaded");
+        return;
+    }   
+    printf("actual black list\n");
+    while (fgets(buffer, sizeof(buffer), access_point) != NULL)
+    {
+        printf("%s", buffer);
+        fflush(stdout);
+        memset(buffer, 0, PATH_MAX);
+    }
+
+    fclose(access_point);
+}
 int main() {
     char input[MAX_COMMAND];
 
@@ -153,7 +196,7 @@ int main() {
     }
 
     show_help();
-
+    
     while (1) {
         printf("\nEnter a command >> ");
         read_line(input, MAX_COMMAND);
@@ -169,7 +212,11 @@ int main() {
             handle_change_path();
         } else if (strcmp(input, "2") == 0 || strcmp(input, "change_password") == 0) {
             handle_change_password();
-        } else if (strcmp(input, "3") == 0 || strcmp(input, "help") == 0) {
+        } else if (strcmp(input, "3") == 0 || strcmp(input, "get_state") == 0) {
+            print_actual_state();
+        } else if (strcmp(input, "4") == 0 || strcmp(input, "blacklist") == 0) {
+            print_black_list();
+        } else if (strcmp(input, "5") == 0 || strcmp(input, "help") == 0) {
             show_help();
         } else {
             printf("Invalid command. Showing help:\n");
