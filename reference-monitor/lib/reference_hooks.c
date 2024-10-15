@@ -73,7 +73,13 @@ struct open_flags {
         int lookup_flags;
 };
 
-int pre_do_filp_open_handler(struct kprobe *ri, struct pt_regs *regs)
+
+
+/// @brief 
+/// @param ri 
+/// @param regs 
+/// @return 
+int pre_do_filp_open_handler(struct kretprobe_instance *ri, struct pt_regs *regs)
 {
 #if defined(__x86_64__)
     struct filename *pathname = (struct filename *)regs->si; 
@@ -93,99 +99,114 @@ int pre_do_filp_open_handler(struct kprobe *ri, struct pt_regs *regs)
 #endif
 
         const char *filename = pathname->name;
-        char *buffer;
         int ret;
         int flags = op_flag->open_flag;
-        int is_parent = 0;
-
+        char *buffer;
+        int is_dir = 0;
+        struct hook_return *data;
+        data = (struct hook_return *)ri->data;
+        data->hook_error = 0;
         if (filename == NULL) {
                 return 0;
         }
-
         
         if (forbitten_path(filename)) {
                 return 0;
         }
 
-        buffer = kmalloc(PATH_MAX, GFP_KERNEL);
-        if (!buffer) {
-                pr_err("%s[%s]: kmalloc error\n", MODNAME, __func__);
-                goto do_filp_open_pre_handler_mem_problem;
+        if (pathname->uptr == NULL) {
+                return 0;
         }
 
-        if (pathname->uptr == NULL) {
-                kfree(buffer);
+        buffer = kzalloc(PATH_MAX, GFP_KERNEL);
+        if (!buffer) {
+                pr_err("%s[%s]: kmalloc error\n", MODNAME, __func__);
+                data->hook_error = -ENOMEM;
                 return 0;
         }
+
         if (copy_from_user(buffer, pathname->uptr, PATH_MAX)) {
-                kfree(buffer);
-                return 0;
-        }
-        ret = get_filter_swap_or_parent(buffer, &is_parent);
-        if (ret) {
-                kfree(buffer);
-                if (ret == -ENOMEM) {
-                        goto do_filp_open_pre_handler_mem_problem;
+                
+                memset(buffer, 0, PATH_MAX);
+                if (filename){
+                        ret = strlen(filename);
+                        strncpy(buffer, filename, ret);
+                        buffer[ret] = '\0';
+                }else{
+                        return 0;
                 }
-                return 0;
+                
+        }
+
+        ret = fill_with_swap_filter(buffer);
+      
+        if (ret) {
+                
+                if (ret == -ENOMEM) {
+                        kfree(buffer);
+                        data->hook_error = -ENOMEM;
+                        return 0;
+                }
+
+                if (ret == -ENOENT){
+                        is_dir = 1;
+                        
+                        get_parent_path(buffer);
+                        ret = fill_absolute_path(buffer);
+                        
+                        if (ret){
+                                if (ret == -ENOMEM){
+                                        data->hook_error = -ENOMEM;
+                                }
+                                kfree(buffer);
+                                return 0;
+                        }
+                }
         }
 
         ret = check_black_list(buffer);
 
         if (!ret) {
 
-                if (is_parent) {
-                        if (flags & (O_CREAT | O_TMPFILE)) {
-                                pr_err("%s[%s]: cannot create create file in "
-                                       "this path=%s\n",
-                                       MODNAME, __func__, buffer);
+                pr_warn("%s[%s]: found black for path=%s, is_parent=%s\n", MODNAME, __func__,
+                 buffer, is_dir == 0? "false" : "true");
+                
+                if (is_dir && (flags & O_CREAT)){
+                        pr_err("%s[%s]: this_dir=%s cannot be modified\n", MODNAME, __func__, buffer);
+                        mark_inode_read_only_by_pathname(buffer);
+                        goto do_filp_open_defer_work;
+                }else {
+                        if (flags & FORBITTEN_MASK){
+                                if (mark_inode_read_only_by_pathname(buffer)) {
+                                        pr_err("%s[%s]: unable to find inode for this pathname=%s\n",
+                                        MODNAME, __func__, buffer);
+                                        kfree(buffer);
+                                        return 0;
+                                }
+                                pr_err("%s[%s]: the file =%s cannot be modified\n", MODNAME, __func__, buffer);
                                 goto do_filp_open_defer_work;
-                        }
-                } else {
-                        if (flags & (O_RDWR | O_WRONLY | O_TRUNC | O_APPEND)) {
-                                pr_err(
-                                    "%s[%s]: the file =%s cannot be modified\n",
-                                    MODNAME, __func__, buffer);
-                                goto do_filp_open_defer_work;
+                                
                         }
                 }
+                
         }
 
         kfree(buffer);
         return 0;
 
-do_filp_open_defer_work:
-        if (mark_indoe_read_only_by_pathname(buffer)) {
-                pr_err("%s[%s]: unable to find inode for this pathname=%s\n",
-                       MODNAME, __func__, buffer);
-                kfree(buffer);
-                return 0;
-        }
-        kfree(buffer);
+do_filp_open_defer_work:    
+        
         AUDIT
         pr_info("%s[%s]: calling work queue", MODNAME, __func__);
         defer_top_half(defer_bottom_half);
+        data->hook_error = -EACCES;
         
-do_filp_open_pre_handler_mem_problem:
-#if defined(__x86_64__)
-        regs->di = -1;
-        ((struct open_flags *)(regs->dx))->open_flag = 0xFFFFFFFF;
-#elif defined(__aarch64__)
-        regs->regs[0] = -1;
-        ((struct open_flags *)(regs->regs[1]))->open_flag = 0xFFFFFFFF;
-#elif defined(__i386__)
-        regs->bx = -1;
-        ((struct open_flags *)(regs->cx))->open_flag = 0xFFFFFFFF;
-#elif defined(__arm__)
-        regs->ARM_r0 = -1;
-        ((struct open_flags *)(regs->r1))->open_flag = 0xFFFFFFFF;
-#endif
         return 0;
 }
 
 
 
-int pre_vfs_mk_rmdir_handler(struct kprobe *ri, struct pt_regs *regs)
+int pre_vfs_mk_rmdir_handler(struct kretprobe_instance *ri, struct pt_regs *regs)
 {
 #if defined(__x86_64__)
         
@@ -231,7 +252,7 @@ store_thread_info_mkrmdir_unlink:
         return 0;
 }
 
-int pre_vfs_unlink_handler(struct kprobe *ri, struct pt_regs *regs)
+int pre_vfs_unlink_handler(struct kretprobe_instance *ri, struct pt_regs *regs)
 {
 #if defined(__x86_64__)
         
@@ -282,5 +303,27 @@ store_thread_info_mkrmdir_unlink:
         pr_info("%s[%s]: calling work queue", MODNAME, __func__);
         defer_top_half(defer_bottom_half);
         kfree(buffer);
+        return 0;
+}
+
+
+int reference_kret_handler(struct kretprobe_instance *ri, struct pt_regs *regs)
+{
+        struct hook_return *data = (struct hook_return *)ri->data;
+        if (data->hook_error){
+                //regs->ax = data->hook_error;
+        
+#if defined(__x86_64__)
+                regs->ax = data->hook_error;  
+#elif defined(__aarch64__)
+                //regs->regs[0] = data->hook_error;
+#endif
+        }
+
+    
+    return 0;
+}
+
+int post_dir_handler(struct kretprobe_instance *ri, struct pt_regs *regs){
         return 0;
 }

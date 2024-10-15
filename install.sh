@@ -17,7 +17,7 @@ run_with_sudo() {
     echo "$PASSWORD" | sudo -S "$@"
 }
 
-source "$global_pwd/unistall.sh" "$PASSWORD"
+source "$global_pwd/uninstall.sh" "$PASSWORD"
 
 cd "$global_pwd/System_call_discover" || exit 1
 echo "Entering System_call_discover folder"
