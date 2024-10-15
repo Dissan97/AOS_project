@@ -121,11 +121,11 @@ int do_change_state(char *the_pwd, int the_state)
 
         if ((current_state & REC_ON) || (current_state & ON)) {
                 for (i = 0; i < HOOKS_SIZE; i++) {
-                        enable_kprobe(&probes[i]);
+                        enable_kretprobe(&probes[i]);
                 }
         } else {
                 for (i = 0; i < HOOKS_SIZE; i++) {
-                        disable_kprobe(&probes[i]);
+                        disable_kretprobe(&probes[i]);
                 }
                 restore_black_list_entries();
         }
@@ -289,3 +289,4 @@ int do_change_password(char *old_password, char *new_password)
 
         return ret;
 }
+

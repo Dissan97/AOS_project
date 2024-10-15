@@ -9,56 +9,106 @@
 #include <linux/slab.h>
 #include <linux/string.h>
 #include <linux/vmalloc.h>
-
+#include <linux/fs_struct.h>
 #include "include/reference_path_solver.h"
 #include "include/reference_types.h"
 #define SWP ".swp"
 #define SWPX ".swpx"
 
-struct fs_struct {
-        int users;
-        spinlock_t lock;
-        seqcount_t seq;
-        int umask;
-        int in_exec;
-        struct path root, pwd;
-} __randomize_layout;
+
+// devo comunque controllare meglio il path che mi viene ritornato
+
+
+void get_parent_path(char *pathname)
+{
+
+
+        int len;
+        if (!pathname){
+                return;
+        }
+        len = strlen(pathname);
+
+        while (len > 0 && pathname[len] != '/'){
+                len--;
+        }
+
+        if (len > 0){
+                pathname[len] = '\0';
+        }
+
+        return;
+}
+
+int resolve_relative_path(char *path_str)
+{
+        char *resolved_path;
+        char *cwd;
+        struct path pwd;
+
+        if (!path_str){
+                return -EINVAL;
+        }
+
+        get_fs_pwd(current->fs, &pwd);
+
+        resolved_path = (char *)kmalloc(PATH_MAX, GFP_KERNEL);
+        if (!resolved_path) {
+        pr_err("%s[%s]: cannot allocate memory for resolve path\n", MODNAME, __func__);
+                return -ENOMEM;
+        }
+
+        cwd = dentry_path_raw(pwd.dentry, resolved_path, PATH_MAX);
+
+        snprintf(resolved_path, PATH_MAX, "%s/%s", cwd, path_str);
+        memset(path_str, 0, PATH_MAX);
+        strncpy(path_str, resolved_path, strlen(resolved_path));
+        path_put(&pwd);
+        return 0;
+}
 
 int fill_absolute_path(char *pathname)
 {
         struct path path;
         char *buffer;
-        char *temp;
-        char *absolute_path_ret;
+        char *full_path;
+        int err;
 
-        if (pathname[0] == '/') {
+        if (!pathname){
+                return -EINVAL;
+        }
+
+        if (pathname[0] != '/') {
+                err = resolve_relative_path(pathname);
+                if (err){
+                        pr_err("%s[%s]: cannot resolve the path\n", MODNAME, __func__);
+                        return err;
+                }
+        }
+
+        if (kern_path(pathname, LOOKUP_FOLLOW, &path) == 0) {
+
+
+                buffer = kzalloc(PATH_MAX, GFP_KERNEL);
+
+                if (!buffer) {
+                        pr_err("%s[%s]: kernel no memory available\n", MODNAME,
+                        __func__);
+                        return -ENOMEM;
+                }
+        
+                full_path = dentry_path_raw(path.dentry, buffer, PATH_MAX);
+                memset(pathname, 0, strlen(pathname));
+                strncpy(pathname, full_path, strlen(full_path));
+                path_put(&path);
+                kfree(buffer);
                 return 0;
         }
-
-        buffer = kzalloc(PATH_MAX, GFP_KERNEL);
-
-        if (!buffer) {
-                pr_err("%s[%s]: kernel no memory available\n", MODNAME,
-                       __func__);
-                return -ENOMEM;
-        }
-
-        temp = kzalloc((PATH_MAX - NAME_MAX + 2), GFP_KERNEL);
-        if (!temp) {
-                pr_err("%s[%s]: kernel no memory available\n", MODNAME,
-                       __func__);
-                kfree(buffer);
-                return -ENOMEM;
-        }
-        strncpy(temp, pathname, (PATH_MAX - NAME_MAX + 1));
-        memset(pathname, 0, PATH_MAX);
-        path = current->fs->pwd;
-        absolute_path_ret = dentry_path_raw(path.dentry, buffer, PATH_MAX);
-        snprintf(pathname, PATH_MAX, "%s/%s", absolute_path_ret, temp);
-        kfree(buffer);
-        kfree(temp);
-        return 0;
+       
+        return -ENOENT;
 }
+
+
 
 int fill_with_swap_filter(char *pathname)
 {
@@ -107,37 +157,7 @@ int fill_with_swap_filter(char *pathname)
         return ret;
 }
 
-int get_filter_swap_or_parent(char *pathname, int *is_parent)
-{
-        int ret = 0;
-        struct path path;
-        int len;
-        int index;
-        ret = fill_with_swap_filter(pathname);
 
-        if (ret) {
-                return ret;
-        }
-
-        ret = kern_path(pathname, LOOKUP_FOLLOW, &path);
-        if (ret) {
-                // Get parent directory assuming at least pwd is setup
-                len = strlen(pathname);
-                for (index = len - 1; index >= 0; index--) {
-                        if (pathname[index] == '/') {
-                                memset(&pathname[index], 0, len - index);
-                                break;
-                        }
-                }
-                ret = kern_path(pathname, LOOKUP_FOLLOW, &path);
-                if (ret) {
-                        return ret;
-                }
-                *is_parent = 1;
-        }
-        path_put(&path);
-        return ret;
-}
 
 int path_struct(char *pathname, struct path *path, int flag)
 {
@@ -154,7 +174,7 @@ void mark_inode_read_only(struct inode *inode)
         mark_inode_dirty(inode);
 }
 
-int mark_indoe_read_only_by_pathname(char *pathname)
+int mark_inode_read_only_by_pathname(char *pathname)
 {
         struct path path;
         int ret;

@@ -270,7 +270,8 @@ spinlock_t restrict_path_lock;
  * *****************************************************
  */
 
-struct kprobe probes[HOOKS_SIZE];
+struct kretprobe probes[HOOKS_SIZE];
+const kretprobe_handler_t handler;
 
 /*
  * *****************************************************
@@ -304,10 +305,20 @@ static int __init reference_monitor_init(void)
 
         const char target_functions[HOOKS_SIZE][16] = {
             "do_filp_open", "vfs_mkdir", "vfs_rmdir", "vfs_unlink"};
-        const kprobe_pre_handler_t pre_handlers[HOOKS_SIZE] = {
+        
+        const kretprobe_handler_t entry_handlers[HOOKS_SIZE] = {
             pre_do_filp_open_handler, pre_vfs_mk_rmdir_handler,
             pre_vfs_mk_rmdir_handler,
-            pre_vfs_unlink_handler};
+            pre_vfs_unlink_handler
+        };
+        const kretprobe_handler_t post_handlers[HOOKS_SIZE] = {
+                reference_kret_handler,
+                post_dir_handler,
+                post_dir_handler,
+                post_dir_handler
+        };        
+
+
 
 #if defined(__x86_64__)
         pr_info("Running on x86_64 architecture.\n");
@@ -409,12 +420,15 @@ static int __init reference_monitor_init(void)
             "%s: all new system-calls correctly installed on sys-call table\n",
             MODNAME);
         // KPROBE INSTALLATION
+        
         for (i = 0; i < HOOKS_SIZE; i++) {
 
-                probes[i].pre_handler = pre_handlers[i];
-                probes[i].symbol_name = target_functions[i];
+                probes[i].entry_handler = entry_handlers[i];
+                probes[i].kp.symbol_name = target_functions[i];
+                probes[i].handler = post_handlers[i];
+                probes[i].data_size = sizeof(struct hook_return);
 
-                ret = register_kprobe(&probes[i]);
+                ret = register_kretprobe(&probes[i]);
                 if (ret < 0) {
                         pr_err("%s: unbale to register kprobe for %s unloading "
                                "previous probes\n",
@@ -423,11 +437,11 @@ static int __init reference_monitor_init(void)
                                 pr_err(
                                     "%s: probe for target func=%s unrestired\n",
                                     MODNAME, target_functions[j]);
-                                unregister_kprobe(&probes[j]);
+                                unregister_kretprobe(&probes[j]);
                         }
                         goto error_syscall_installed;
                 }
-                disable_kprobe(&probes[i]);
+                disable_kretprobe(&probes[i]);
                 AUDIT
                 pr_info(
                     "%s: kprobe for target_fun -> %s installed but disbled\n",
@@ -481,7 +495,7 @@ error_proc_folder_created:
 
 error_kprobe_installed:
         for (i = 0; i < HOOKS_SIZE; i++) {
-                unregister_kprobe(&probes[i]);
+                unregister_kretprobe(&probes[i]);
         }
 error_syscall_installed:
         unload_syscall;
@@ -497,7 +511,7 @@ static void __exit reference_monitor_cleanup(void)
         AUDIT
         pr_info("%s: shutting down\n", MODNAME);
         for (i = 0; i < HOOKS_SIZE; i++) {
-                unregister_kprobe(&probes[i]);
+                unregister_kretprobe(&probes[i]);
         }
         AUDIT
         pr_info("%s: unregistered all kprobes\n", MODNAME);
