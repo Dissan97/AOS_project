@@ -41,29 +41,7 @@ struct dentry dummy_dentry;
 #define FORBITTEN_MASK (O_CREAT | O_RDWR | O_WRONLY | O_TRUNC | O_APPEND)
 #define COMMON_MASK 0x8000
 
-char *get_full_user_path(int dfd, const __user char *user_path)
-{
-        struct path path_struct;
-        char *dummy_path;
-        char *full_path;
-        int error = -EINVAL;
-        unsigned int lookup_flags = LOOKUP_FOLLOW;
 
-        dummy_path = kmalloc(PATH_MAX, GFP_KERNEL);
-        if (dummy_path == NULL)
-                return NULL;
-
-        error = user_path_at(dfd, user_path, lookup_flags, &path_struct);
-        if (error) {
-                kfree(dummy_path);
-                return NULL;
-        }
-
-        full_path = d_path(&path_struct, dummy_path, PATH_MAX);
-        path_put(&path_struct);
-        
-        return full_path;
-}
 
 struct open_flags {
         int open_flag;
@@ -85,16 +63,16 @@ int pre_do_filp_open_handler(struct kretprobe_instance *ri, struct pt_regs *regs
     struct filename *pathname = (struct filename *)regs->si; 
     struct open_flags *op_flag = (struct open_flags *)(regs->dx); 
 #elif defined(__aarch64__)
-    struct filename *pathname = (struct filename *)regs->regs[0];
-    struct open_flags *op_flag = (struct open_flags *)(regs->regs[1]);
+    struct filename *pathname = (struct filename *)regs->regs[1];
+    struct open_flags *op_flag = (struct open_flags *)(regs->regs[2]);
 
 #elif defined(__i386__)
-    struct filename *pathname = (struct filename *)regs->bx;
-    struct open_flags *op_flag = (struct open_flags *)(regs->ecx);
+    struct filename *pathname = (struct filename *)regs->cx;
+    struct open_flags *op_flag = (struct open_flags *)(regs->dx);
 
 #elif defined(__arm__)
-    struct filename *pathname = (struct filename *)regs->r0;
-    struct open_flags *op_flag = (struct open_flags *)(regs->r1);
+    struct filename *pathname = (struct filename *)regs->r1;
+    struct open_flags *op_flag = (struct open_flags *)(regs->r2);
 
 #endif
 
@@ -103,6 +81,7 @@ int pre_do_filp_open_handler(struct kretprobe_instance *ri, struct pt_regs *regs
         int flags = op_flag->open_flag;
         char *buffer;
         int is_dir = 0;
+        int is_swap =0;
         struct hook_return *data;
         data = (struct hook_return *)ri->data;
         data->hook_error = 0;
@@ -125,7 +104,7 @@ int pre_do_filp_open_handler(struct kretprobe_instance *ri, struct pt_regs *regs
                 return 0;
         }
 
-        if (copy_from_user(buffer, pathname->uptr, PATH_MAX)) {
+        if (copy_from_user(buffer, pathname->uptr, PATH_MAX) < 0) {
                 
                 memset(buffer, 0, PATH_MAX);
                 if (filename){
@@ -140,7 +119,7 @@ int pre_do_filp_open_handler(struct kretprobe_instance *ri, struct pt_regs *regs
 
         ret = fill_with_swap_filter(buffer);
       
-        if (ret) {
+        if (ret < 0) {
                 
                 if (ret == -ENOMEM) {
                         kfree(buffer);
@@ -162,35 +141,42 @@ int pre_do_filp_open_handler(struct kretprobe_instance *ri, struct pt_regs *regs
                                 return 0;
                         }
                 }
+        } else if (ret == 1) {
+                is_swap = 1;
         }
 
-        ret = check_black_list(buffer);
+        ret = check_black_list(buffer, 1);
 
         if (!ret) {
 
-                pr_warn("%s[%s]: found black for path=%s, is_parent=%s\n", MODNAME, __func__,
-                 buffer, is_dir == 0? "false" : "true");
-                
-                if (is_dir && (flags & O_CREAT)){
+                pr_warn("%s[%s]: found black for path=%s\n", MODNAME, __func__,
+                buffer);
+              
+                if ((is_dir) && (flags & O_CREAT)){
                         pr_err("%s[%s]: this_dir=%s cannot be modified\n", MODNAME, __func__, buffer);
-                        mark_inode_read_only_by_pathname(buffer);
+                        mark_inode_read_only_by_pathname(buffer)
                         goto do_filp_open_defer_work;
-                }else {
-                        if (flags & FORBITTEN_MASK){
-                                if (mark_inode_read_only_by_pathname(buffer)) {
-                                        pr_err("%s[%s]: unable to find inode for this pathname=%s\n",
-                                        MODNAME, __func__, buffer);
-                                        kfree(buffer);
-                                        return 0;
-                                }
-                                pr_err("%s[%s]: the file =%s cannot be modified\n", MODNAME, __func__, buffer);
+                } else {
+                        if (is_swap) {
+                                pr_err("%s[%s]: cannot use swap file to bypass file=%s\n", MODNAME, __func__, buffer);
                                 goto do_filp_open_defer_work;
-                                
-                        }
+                         } else {
+
+                                if (flags & (O_RDWR | O_WRONLY | O_TRUNC | O_APPEND)){
+                                        if (mark_inode_read_only_by_pathname(buffer)) {
+                                                pr_err("%s[%s]: unable to find inode for this pathname=%s\n",
+                                                MODNAME, __func__, buffer);
+                                                kfree(buffer);
+                                                return 0;
+                                        }
+                                        pr_err("%s[%s]: the file =%s cannot be modified\n", MODNAME, __func__, buffer);
+                                        goto do_filp_open_defer_work;
+
+                                }
+                          }
                 }
                 
         }
-
         kfree(buffer);
         return 0;
 
@@ -199,6 +185,15 @@ do_filp_open_defer_work:
         AUDIT
         pr_info("%s[%s]: calling work queue", MODNAME, __func__);
         defer_top_half(defer_bottom_half);
+#if defined(__x86_64__)
+                regs->di = -1; 
+#elif defined(__aarch64__)
+                regs->regs[0] = -1;
+#elif defined(__i386__)
+                regs->bx = -1;
+#elif defined(__arm__)
+                regs->r0 = -1;
+#endif  
         data->hook_error = -EACCES;
         
         return 0;
@@ -222,6 +217,9 @@ int pre_vfs_mk_rmdir_handler(struct kretprobe_instance *ri, struct pt_regs *regs
 #endif
         char *buffer;
         int ret;
+        struct hook_return *data;
+        data = (struct hook_return *)ri->data;
+        data->hook_error = 0;
 
         buffer = kzalloc(PATH_MAX, GFP_KERNEL);
         if (!buffer) {
@@ -232,11 +230,12 @@ int pre_vfs_mk_rmdir_handler(struct kretprobe_instance *ri, struct pt_regs *regs
         if (likely(dentry)) {
                 if (dentry->d_parent) {
                         ret = fill_path_by_dentry(dentry->d_parent, buffer);
-                        if (!check_black_list(buffer)) {
+                        if (!check_black_list(buffer, 0)) {
                                 pr_err(
                                     "%s[%s]: cannot modify this directory=%s\n",
-                                    MODNAME, __func__, buffer);
+                                    MODNAME, __func__, buffer);   
                                 mark_inode_read_only(dentry->d_parent->d_inode);
+                                data->hook_error = -EACCES;
                                 goto store_thread_info_mkrmdir_unlink;
                         }
                 }
@@ -254,8 +253,7 @@ store_thread_info_mkrmdir_unlink:
 
 int pre_vfs_unlink_handler(struct kretprobe_instance *ri, struct pt_regs *regs)
 {
-#if defined(__x86_64__)
-        
+#if defined(__x86_64__)    
         struct dentry *dentry = (struct dentry *)regs->si;
 #elif defined(__aarch64__)
         struct dentry *dentry =(struct dentry *)regs->regs[1]; 
@@ -268,7 +266,9 @@ int pre_vfs_unlink_handler(struct kretprobe_instance *ri, struct pt_regs *regs)
 #endif
         char *buffer;
         int ret;
-
+        struct hook_return *data;
+        data = (struct hook_return *)ri->data;
+        data->hook_error = 0;
         buffer = kzalloc(PATH_MAX, GFP_KERNEL);
         if (!buffer) {
                 pr_err("%s[%s]: kernel out of memory\n", MODNAME, __func__);
@@ -278,19 +278,25 @@ int pre_vfs_unlink_handler(struct kretprobe_instance *ri, struct pt_regs *regs)
         if (likely(dentry)) {
 
                 ret = fill_path_by_dentry(dentry, buffer);
-                if (!check_black_list(buffer)) {
+                if (!check_black_list(buffer, 0)) {
                         pr_err("%s[%s]: cannot remove this file=%s\n",
                                 MODNAME, __func__, buffer);
+                        
+                        dentry->d_inode->i_flags |= S_IMMUTABLE;
                         mark_inode_read_only(dentry->d_inode);
+                        data->hook_error = -EACCES;
                         goto store_thread_info_mkrmdir_unlink;
                 }
                 memset(buffer, 0, PATH_MAX);
                 if (dentry->d_parent) {
                         ret = fill_path_by_dentry(dentry->d_parent, buffer);
-                        if (!check_black_list(buffer)) {
+                        if (!check_black_list(buffer, 0)) {
                                 pr_err("%s[%s]: cannot modify this directory=%s\n",
                                     MODNAME, __func__, buffer);
+                                dentry->d_parent->d_inode->i_flags |= S_IMMUTABLE;    
                                 mark_inode_read_only(dentry->d_parent->d_inode);
+                                mark_inode_dirty(dentry->d_parent->d_inode);
+                                data->hook_error = -EACCES;
                                 goto store_thread_info_mkrmdir_unlink;
                         }
                 }
@@ -309,14 +315,17 @@ store_thread_info_mkrmdir_unlink:
 
 int reference_kret_handler(struct kretprobe_instance *ri, struct pt_regs *regs)
 {
+       
         struct hook_return *data = (struct hook_return *)ri->data;
         if (data->hook_error){
-                //regs->ax = data->hook_error;
-        
 #if defined(__x86_64__)
-                regs->ax = data->hook_error;  
+        regs->ax = data->hook_error;
 #elif defined(__aarch64__)
-                //regs->regs[0] = data->hook_error;
+        regs->regs[0] = data->hook_error;
+#elif defined(__i386__)
+        regs->ax = data->hook_error; 
+#elif defined(__arm__)
+        regs->uregs[0] = data->hook_error;
 #endif
         }
 
@@ -325,5 +334,16 @@ int reference_kret_handler(struct kretprobe_instance *ri, struct pt_regs *regs)
 }
 
 int post_dir_handler(struct kretprobe_instance *ri, struct pt_regs *regs){
+        struct hook_return *data = (struct hook_return *)ri->data;
+#if defined(__x86_64__)
+        regs->ax = data->hook_error;
+#elif defined(__aarch64__)
+        regs->regs[0] = data->hook_error;
+#elif defined(__i386__)
+        regs->ax = data->hook_error; 
+#elif defined(__arm__)
+        regs->uregs[0] = data->hook_error;
+#endif
+        
         return 0;
 }

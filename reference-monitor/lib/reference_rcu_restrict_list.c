@@ -211,7 +211,7 @@ int forbitten_path(const char *the_path)
                    : 0;
 }
 
-int check_black_list(const char *path)
+int check_black_list(const char *path, int is_open)
 {
 
         struct rcu_restrict *entry;
@@ -235,7 +235,7 @@ int check_black_list(const char *path)
                         return 0;
                 }
                 // if the path exists in black list check for hardlinks
-                if (!err) {
+                if (!err && is_open) {
                         if (target_path.dentry) {
                                 if (entry->i_ino ==
                                     target_path.dentry->d_inode->i_ino) {
