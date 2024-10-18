@@ -55,11 +55,11 @@ gcc stress_test.c -o stress_test.out -lpthread -DLOOPS=$loops
 echo "test open"
 ./stress_test.out -target open -threads $threads -filepaths "test-dir/test-file;test-dir/test-filehl;test-dir/test-child/test-filehl" -num_paths 3
 echo "test mkdir"
-#./stress_test.out -target mkdir -threads $threads -filepaths "test-dir/test-child" -num_paths 1
+./stress_test.out -target mkdir -threads $threads -filepaths "test-dir/test-child" -num_paths 1
 echo "test rmdir"
-#./stress_test.out -target rmdir -threads $threads -filepaths "test-dir/test-child/another-dir" -num_paths 1
+./stress_test.out -target rmdir -threads $threads -filepaths "test-dir/test-child/another-dir" -num_paths 1
 echo "test unlink"
-#./stress_test.out -target unlink -threads $threads -filepaths "test-dir/test-child/test-filehl" -num_paths 1
+./stress_test.out -target unlink -threads $threads -filepaths "test-dir/test-child/test-filehl" -num_paths 1
 run_with_sudo echo "cngpth -opt RMPTH -pwd $2 -pth test-dir/test-file" > /proc/ref_syscall/access_point
 run_with_sudo echo "cngpth -opt RMPTH -pwd $2 -pth test-dir/test-child" > /proc/ref_syscall/access_point
 run_with_sudo echo "cngst -opt $before_state_arg -pwd $2" > /proc/ref_syscall/access_point

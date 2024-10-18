@@ -13,7 +13,7 @@
 
 #include "singlefilefs.h"
 
-DEFINE_RWLOCK(lock_log); // Use DEFINE_RWLOCK for initialization
+DEFINE_MUTEX(lock_log);
 
 static int onefilefs_open(struct inode *inode, struct file *filp)
 {
@@ -30,7 +30,7 @@ static int onefilefs_open(struct inode *inode, struct file *filp)
 static int onefilefs_release(struct inode *inode, struct file *filp)
 {
     pr_info("%s: file closed: %s\n", MOD_NAME, filp->f_path.dentry->d_name.name);
-    return 0;  
+    return 0;
 }
 
 ssize_t onefilefs_read(struct file *filp, char __user *buf, size_t len,
@@ -39,58 +39,57 @@ ssize_t onefilefs_read(struct file *filp, char __user *buf, size_t len,
     loff_t offset;
     struct buffer_head *bh = NULL;
     struct inode *the_inode = filp->f_inode;
-    uint64_t file_size = the_inode->i_size;
+    uint64_t file_size;
     int ret;
     int block_to_read;
 
-    read_lock(&lock_log); // Use read_lock
-
+    mutex_lock(&lock_log);
+    file_size = the_inode->i_size;
     if (file_size == 0) {
-        read_unlock(&lock_log); // Use read_unlock
-        return 0; 
+        mutex_unlock(&lock_log);
+        return 0;
     }
 
     if (*off >= file_size) {
         pr_warn("%s: cannot go over file_size\n", MOD_NAME);
-        read_unlock(&lock_log); // Use read_unlock
-        return 0; 
+        mutex_unlock(&lock_log);
+        return 0;
     }
 
     if (*off + len > file_size) {
-        len = file_size - *off; 
+        len = file_size - *off;
     }
-  
+
     offset = *off % DEFAULT_BLOCK_SIZE;
-   
+
     if (offset + len > DEFAULT_BLOCK_SIZE) {
-        len = DEFAULT_BLOCK_SIZE - offset; 
+        len = DEFAULT_BLOCK_SIZE - offset;
     }
-    
-    block_to_read = *off / DEFAULT_BLOCK_SIZE + 2; 
-    
+
+    block_to_read = *off / DEFAULT_BLOCK_SIZE + 2;
+
     bh = sb_bread(filp->f_path.dentry->d_inode->i_sb, block_to_read);
     if (!bh) {
-        read_unlock(&lock_log); // Use read_unlock
-        return -EIO; 
+        mutex_unlock(&lock_log);
+        return -EIO;
     }
-   
+
     ret = copy_to_user(buf, bh->b_data + offset, len);
     if (ret != 0) {
         brelse(bh);
-        read_unlock(&lock_log); // Use read_unlock
-        return -EFAULT; 
+        mutex_unlock(&lock_log);
+        return -EFAULT;
     }
-   
-    *off += len; 
+
+    *off += len;
 
     brelse(bh);
-    read_unlock(&lock_log); // Use read_unlock
+    mutex_unlock(&lock_log);
 
-    return len; 
+    return len;
 }
 
-ssize_t onefilefs_write(struct file *filp, const char __user *buf, size_t len, loff_t *off)
-{
+ssize_t onefilefs_write(struct file *filp, const char __user *buf, size_t len, loff_t *off) {
     struct inode *inode = filp->f_inode;
     struct super_block *sb = inode->i_sb;
     struct buffer_head *bh;
@@ -102,23 +101,24 @@ ssize_t onefilefs_write(struct file *filp, const char __user *buf, size_t len, l
     size_t write_len;
     ssize_t res = 0;
     loff_t pos;
+    loff_t pos_max;
 
-    write_lock(&lock_log); // Use write_lock
-    pr_info("%s: write called\n", MOD_NAME);
-
-    if ((inode->i_size + len) >= max_file_size) {
-        pr_warn("%s: max dimension of file reached %ld\n", MOD_NAME, max_file_size);
-        return -EFBIG;
-    }        
-
+    mutex_lock(&lock_log);
     inode_lock(inode);
-    pos = inode->i_size;
+    pos = i_size_read(inode);
+    pr_info("%s: write called current pos=%lld\n", MOD_NAME, pos);
+
+    if ((pos + len) >= max_file_size) {
+        pr_warn("%s: max dimension of file reached %ld\n", MOD_NAME, max_file_size);
+        res = -EFBIG;
+        goto out_unlock_inode;
+    }
 
     while (to_write > 0) {
-        block_number = pos / DEFAULT_BLOCK_SIZE + 2; 
-        offset = pos % DEFAULT_BLOCK_SIZE; 
+        block_number = pos / DEFAULT_BLOCK_SIZE + 2;
+        offset = pos % DEFAULT_BLOCK_SIZE;
 
-        bh = sb_bread(sb, block_number); 
+        bh = sb_bread(sb, block_number);
         if (!bh) {
             res = -EIO;
             goto out_unlock_inode;
@@ -132,27 +132,28 @@ ssize_t onefilefs_write(struct file *filp, const char __user *buf, size_t len, l
             goto out_unlock_inode;
         }
 
-        mark_buffer_dirty(bh); 
-        sync_dirty_buffer(bh); 
-        brelse(bh); 
-        pos += write_len; 
-        to_write -= write_len; 
-        written += write_len; 
+        mark_buffer_dirty(bh);
+        sync_dirty_buffer(bh);
+        brelse(bh);
+        pos += write_len;
+        to_write -= write_len;
+        written += write_len;
     }
 
-    inode->i_size = pos;
+    pos_max = max(pos, i_size_read(inode));
+    i_size_write(inode, pos_max);
+    mark_inode_dirty(inode);
+    sync_blockdev(sb->s_bdev);
     *off = pos;
 
-    mark_inode_dirty(inode); 
-    sync_blockdev(sb->s_bdev); 
-
-    res = written; 
+    res = written;
 
 out_unlock_inode:
-    inode_unlock(inode); 
-    write_unlock(&lock_log); // Use write_unlock
-    return res; 
+    inode_unlock(inode);
+    mutex_unlock(&lock_log);
+    return res;
 }
+
 
 static loff_t onefilefs_llseek(struct file *filp, loff_t offset, int whence)
 {

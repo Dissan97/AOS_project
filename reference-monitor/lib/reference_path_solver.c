@@ -116,10 +116,8 @@ int fill_with_swap_filter(char *pathname)
         int len;
         int dot_index = -1;
         int index;
-        ret = fill_absolute_path(pathname);
-        if (ret) {
-                return ret;
-        }
+        int absolute_ret;
+
 
         len = strlen(pathname);
         if (len < 6) {
@@ -127,11 +125,13 @@ int fill_with_swap_filter(char *pathname)
         }
 
         if ((strncmp(&pathname[len - 4], SWP, 4) == 0) ||
-            (strncmp(&pathname[len - 5], SWPX, 5) == 0)) {
-                pr_info("%s[%s]: found swap file file=%s\n", MODNAME, __func__,
-                        pathname);
+            (strncmp(&pathname[len - 5], SWPX, 5) == 0) ||
+            (strncmp(&pathname[len - 1], "~", 1) == 0))
+        {
+                pr_info("%s[%s]: found swap file file=%s\n", MODNAME, __func__, pathname);
+                ret = 1;
+                // Find the last slash
                 for (index = len - 1; index >= 0; index--) {
-
                         if (pathname[index] == '/') {
                                 if (pathname[index + 1] == '.') {
                                         dot_index = index + 1;
@@ -140,18 +140,26 @@ int fill_with_swap_filter(char *pathname)
                         }
                 }
 
+                // Remove dot if it exists
                 if (dot_index != -1) {
-                        memmove(&pathname[dot_index], &pathname[dot_index + 1],
-                                len - dot_index);
+                        memmove(&pathname[dot_index], &pathname[dot_index + 1], len - dot_index);
                         len--;
-                        pathname[len] = '\0';
+                        pathname[len] = '\0';  // Ensure null termination
                 }
 
+                // Clear swap indicators and tilde
                 if (strncmp(&pathname[len - 4], SWP, 4) == 0) {
                         memset(&pathname[len - 4], 0, 4);
                 } else if (strncmp(&pathname[len - 5], SWPX, 5) == 0) {
                         memset(&pathname[len - 5], 0, 5);
+                } else if (strncmp(&pathname[len - 1], "~", 1) == 0) {
+                        pathname[len - 1] = '\0';  // Properly terminate the string
                 }
+        }
+
+        absolute_ret = fill_absolute_path(pathname);
+        if (absolute_ret) {
+                return absolute_ret;
         }
 
         return ret;
@@ -166,7 +174,6 @@ int path_struct(char *pathname, struct path *path, int flag)
 
 void mark_inode_read_only(struct inode *inode)
 {
-
         inode->i_mode &= ~S_IWUSR;
         inode->i_mode &= ~S_IWGRP;
         inode->i_mode &= ~S_IWOTH;

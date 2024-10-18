@@ -28,4 +28,4 @@ int forbitten_path(const char *);
 int restore_black_list_entries(void);
 int add_path(char *the_path, struct path path);
 int del_path(char *);
-int check_black_list(const char *path);
+int check_black_list(const char *path, int is_open);
