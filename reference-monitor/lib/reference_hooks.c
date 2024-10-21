@@ -154,7 +154,12 @@ int pre_do_filp_open_handler(struct kretprobe_instance *ri, struct pt_regs *regs
               
                 if ((is_dir) && (flags & O_CREAT)){
                         pr_err("%s[%s]: this_dir=%s cannot be modified\n", MODNAME, __func__, buffer);
-                        mark_inode_read_only_by_pathname(buffer)
+                        if (mark_inode_read_only_by_pathname(buffer)) {
+                                                pr_err("%s[%s]: unable to find inode for this pathname=%s\n",
+                                                MODNAME, __func__, buffer);
+                                                kfree(buffer);
+                                                return 0;
+                        }
                         goto do_filp_open_defer_work;
                 } else {
                         if (is_swap) {
